@@ -102,6 +102,7 @@
         <h1 id="t-video">Cargando…</h1>
         <p id="t-estado" class="estado"></p>
       </div>
+      <button class="boton cuadrado ayuda" id="b-ayuda" aria-label="¿Cómo se usa?" title="¿Cómo se usa?">?</button>
       <div class="vistas" role="tablist" aria-label="Secciones">
         <button role="tab" id="tab-monitoreo" aria-selected="true" aria-controls="vista-monitoreo">
           <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="12" rx="2"/><path d="M8 21h8M12 17v4"/></svg>Monitoreo</button>
@@ -143,6 +144,10 @@
           <span id="t-tiempo" class="tiempo">0:00 / 0:00</span>
           <span id="t-coord" class="coord"></span>
           <button class="zoom" id="b-zoom" hidden></button>
+          <button class="mini" id="b-llenar" aria-pressed="false" aria-label="Llenar" title="Agranda el video hasta llenar el espacio (arrastra para moverlo)">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg><span>Llenar</span></button>
+          <button class="mini" id="b-pantalla" aria-pressed="false" aria-label="Pantalla completa" title="Usar toda la pantalla (Esc para salir)">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 8V3h5M21 8V3h-5M3 16v5h5M21 16v5h-5M8 8h8v8H8z"/></svg><span>Pantalla completa</span></button>
         </div>
         <div class="controles">
           <button class="boton primario" id="b-pausa">▶&nbsp; Iniciar</button>
@@ -169,7 +174,7 @@
             <button role="radio" data-corte="todo">Todo el video</button>
           </div>
           <button class="boton primario" id="b-exportar-res">
-            <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11m0 0-4-4m4 4 4-4M5 20h14"/></svg>Exportar a Excel</button>
+            <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11m0 0-4-4m4 4 4-4M5 20h14"/></svg><span>Exportar a Excel</span></button>
         </div>
       </div>
       <p class="nota-res" id="res-nota" hidden></p>
@@ -262,6 +267,18 @@
     <button class="boton" id="conf-si"></button>
     <button class="boton primario" id="conf-no"></button>
   </div>
+</dialog>
+
+<dialog id="dlg-ayuda" class="dialogo ayuda-dlg" aria-labelledby="ayuda-titulo">
+  <div class="dlg-cab"><h3 id="ayuda-titulo">¿Cómo se usa?</h3></div>
+  <ol class="pasos-ayuda">
+    <li><b>Dibuja una zona.</b> En el panel izquierdo (☰ en el celular) elige el tipo y una forma, y dibújala sobre el video.</li>
+    <li><b>Ponle nombre.</b> Escribe su nombre, su límite de velocidad si tiene, y si es Vía, Cola, Carguío o Chancadora.</li>
+    <li><b>Pulsa Iniciar.</b> Verás contar los camiones y salir los avisos. Puedes pausar, retroceder y hacer zoom.</li>
+    <li><b>Abre Resultados.</b> Gráficas, tablas y conclusiones con tus zonas, y tu Excel con <b>Exportar a Excel</b>.</li>
+  </ol>
+  <p class="suave">Tus zonas solo quedan en tu equipo: usa <b>Guardar zonas</b> para no perderlas al cerrar la página.</p>
+  <div class="dlg-botones"><button class="boton primario" data-cerrar>Entendido</button></div>
 </dialog>
 
 <div class="toast" id="toast" role="status" hidden></div>

@@ -1,0 +1,3 @@
+Pyodide 0.27.7 (https://pyodide.org) - Mozilla Public License 2.0.
+openpyxl 3.1.5 y et_xmlfile 2.0.0 - licencia MIT.
+Se incluyen sin cambios para generar el Excel dentro del navegador.

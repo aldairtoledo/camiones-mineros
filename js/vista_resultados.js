@@ -44,8 +44,7 @@ export async function mostrarResultados(ctx, corteInicial) {
   if (!ESTADO.tablero) {
     $("res-kpis").innerHTML = '<p class="cargando-res">Preparando los resultados…</p>';
     try {
-      ESTADO.cargando = ESTADO.cargando || fetch(ctx.base + "resultados.json").then((r) => { if (!r.ok) throw new Error(); return r.json(); });
-      [ESTADO.tablero] = await Promise.all([ESTADO.cargando, cargarECharts()]);
+      await Promise.all([cargarTablero(ctx.base), cargarECharts()]);
     } catch {
       $("res-kpis").innerHTML = '<p class="vacio">No se encontraron los datos de resultados (resultados.json). Vuelve a correr exportar_demo.py en la laptop.</p>';
       return;
@@ -54,6 +53,16 @@ export async function mostrarResultados(ctx, corteInicial) {
   if (raiz.hidden) return;                       // el usuario ya volvio a Monitoreo
   pintar();
 }
+
+/** Datos del dashboard (resultados.json); los usa tambien el Excel del visitante. */
+export function cargarTablero(base) {
+  if (ESTADO.tablero) return Promise.resolve(ESTADO.tablero);
+  ESTADO.cargando = ESTADO.cargando || fetch(base + "resultados.json")
+    .then((r) => { if (!r.ok) throw new Error("sin resultados.json"); return r.json(); })
+    .catch((e) => { ESTADO.cargando = null; throw e; });
+  return ESTADO.cargando.then((t) => (ESTADO.tablero = t));
+}
+export const corteResultados = () => ESTADO.corte;
 
 export function redimensionarResultados() {
   for (const g of ESTADO.graficas) g.resize();
@@ -85,7 +94,7 @@ function pintar() {
   $("res-sub").textContent = `${E.demo.video} · ${R.completo ? `todo el video (${hms(dur)})` : `primeros ${hms(R.T)} de ${hms(dur)}`} · calibración ${calib}`;
   const notas = [];
   if (!E.iniciado) notas.push("Todavía no iniciaste el video, así que ves el resumen del análisis completo.");
-  if (E.cambiado) notas.push("Estos resultados usan tus zonas y límites. El Excel descargable se generó con las zonas originales del análisis.");
+  if (E.cambiado) notas.push("Estos resultados usan tus zonas y límites. El botón Exportar a Excel arma tu Excel con ellos.");
   $("res-nota").hidden = !notas.length;
   $("res-nota").textContent = notas.join(" ");
   pintarKpis(R);
@@ -276,7 +285,7 @@ function pintarGraficas(R) {
       series: R.zonas.map((z, i) => ({ name: z.nombre_zona, type: "line", step: "middle", symbol: "none", lineStyle: { width: 2 },
         color: CATEGORICA[i % CATEGORICA.length], data: R.ocupacion.map((o) => +o.promedio[i].toFixed(2)) })) });
     const z = R.zonas.reduce((m, x) => ((x.ocupacion_maxima || 0) > (m.ocupacion_maxima || 0) ? x : m));
-    $("g-ocupacion-c").innerHTML = `<b>En resumen:</b> la zona más llena fue ${esc(z.nombre_zona)}, con hasta ${z.ocupacion_maxima || 0} camiones a la vez (en promedio ${(z.ocupacion_promedio || 0).toFixed(1)}).`;
+    $("g-ocupacion-c").innerHTML = `<b>En resumen:</b> la zona más llena fue ${esc(z.nombre_zona)}, con hasta ${plural(z.ocupacion_maxima || 0, "camión", "camiones")} a la vez (en promedio ${(z.ocupacion_promedio || 0).toFixed(1)}).`;
   } else {
     $("g-ocupacion").outerHTML = '<div class="vacio">Dibuja zonas en Monitoreo para ver cuántos camiones hubo en cada una a lo largo del video.</div>';
     $("g-ocupacion-c").remove();

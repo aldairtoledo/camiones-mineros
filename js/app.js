@@ -5,7 +5,8 @@
 import { Georreferencia, pasoGrilla } from "./georef.js";
 import { recalcular, combinarAvisos, puntoEnPoligono, redondearPar, area, g } from "./recalculo.js";
 import { ROLES } from "./resultados.js";
-import { mostrarResultados, redimensionarResultados, elegirTabla, elegirCorte } from "./vista_resultados.js";
+import { mostrarResultados, redimensionarResultados, elegirTabla, elegirCorte, cargarTablero, corteResultados } from "./vista_resultados.js";
+import { datosParaExcel, generarExcel } from "./excel_web.js";
 
 // ---------------------------------------------------------------- constantes (de app.py)
 const COLOR_ZONA = { acumulativa: "#FF8000", dinamica: "#FF00FF" };
@@ -36,7 +37,8 @@ const E = {
   iniciado: false, vivo: 0, tReloj: performance.now(),
   tipo: "acumulativa", forma: null, dibujo: null,
   velocidades: false, regla: false, puntosRegla: [], grilla: false, conteo: true,
-  vista: { zoom: 1, cx: 400, cy: 300 }, rect: { x: 0, y: 0, w: 1, h: 1 }, dpr: 1,
+  vista: { zoom: 1, cx: 400, cy: 300 }, rect: { x: 0, y: 0, w: 1, h: 1 }, vis: { x: 0, y: 0, w: 1, h: 1 }, dpr: 1,
+  llenar: false,
   mouse: null, fichaFija: null, zonaResaltada: null, zonaHover: null,
   ranuras: [], tAvisos: 0, idxConteo: -1, punteros: new Map(), gesto: null,
 };
@@ -257,10 +259,16 @@ function diseno() {
   capa.height = Math.round(H * E.dpr);
   const [rw, rh] = E.demo ? E.demo.resolucion : [16, 9];
   const prop = rw / rh;
-  const bw = Math.min(W, H * prop), bh = bw / prop;
-  E.rect = { x: (W - bw) / 2, y: (H - bh) / 2, w: bw, h: bh };
+  // Normal: el video entero cabe (puede sobrar a los lados). "Llenar": ocupa todo el espacio y lo que
+  // sobresale (arriba/abajo o a los lados) se ve arrastrando. Nunca se deforma.
+  const bw = E.llenar ? Math.max(W, H * prop) : Math.min(W, H * prop), bh = bw / prop;
+  E.rect = { x: (W - bw) / 2, y: (H - bh) / 2, w: bw, h: bh };            // el video completo
+  E.vis = { x: Math.max(0, E.rect.x), y: Math.max(0, E.rect.y), w: Math.min(W, bw), h: Math.min(H, bh) };  // lo que se ve
+  // "Llenar" solo tiene sentido si sobra espacio a los lados o arriba/abajo (mas de un 4 %).
+  const sobra = Math.max(W / Math.min(W, H * prop), H / (Math.min(W, H * prop) / prop));
+  $("b-llenar").hidden = !E.llenar && sobra < 1.04;
   const r = $("recorte");
-  Object.assign(r.style, { left: `${E.rect.x}px`, top: `${E.rect.y}px`, width: `${bw}px`, height: `${bh}px` });
+  Object.assign(r.style, { left: `${E.vis.x}px`, top: `${E.vis.y}px`, width: `${E.vis.w}px`, height: `${E.vis.h}px` });
   video.style.width = `${bw}px`;
   video.style.height = `${bh}px`;
   dibujarLinea();
@@ -269,26 +277,26 @@ function diseno() {
 function geom() {
   // canvas = o + logico * e  (logico = cuadro de trabajo del motor, 800 x 600)
   const [AW, AH] = E.demo ? E.demo.trabajo : [800, 600];
-  const v = E.vista, r = E.rect;
+  const v = E.vista, r = E.rect, s = E.vis;
   const ex = r.w / AW * v.zoom, ey = r.h / AH * v.zoom;
-  const mw = r.w / 2 / ex, mh = r.h / 2 / ey;
+  const mw = s.w / 2 / ex, mh = s.h / 2 / ey;
   if (!(ex > 0 && ey > 0)) return { ex: 0, ey: 0, ox: r.x, oy: r.y };
   v.cx = Math.min(Math.max(v.cx, mw), AW - mw);
   v.cy = Math.min(Math.max(v.cy, mh), AH - mh);
-  return { ex, ey, ox: r.x + r.w / 2 - v.cx * ex, oy: r.y + r.h / 2 - v.cy * ey };
+  return { ex, ey, ox: s.x + s.w / 2 - v.cx * ex, oy: s.y + s.h / 2 - v.cy * ey };
 }
 
 function aplicarZoom() {
   const { ox, oy } = geom();
-  video.style.transform = `translate(${ox - E.rect.x}px, ${oy - E.rect.y}px) scale(${E.vista.zoom})`;
+  video.style.transform = `translate(${ox - E.vis.x}px, ${oy - E.vis.y}px) scale(${E.vista.zoom})`;
   const con = E.vista.zoom > 1.001;
   $("b-zoom").hidden = !con;
   if (con) $("b-zoom").textContent = `Zoom ${Math.round(E.vista.zoom * 100)} %  ✕`;
 }
 
 function acercar(factor, x, y) {
-  const r = E.rect;
-  if (x == null) { x = r.x + r.w / 2; y = r.y + r.h / 2; }
+  const r = E.rect, s = E.vis;
+  if (x == null) { x = s.x + s.w / 2; y = s.y + s.h / 2; }
   const { ex, ey, ox, oy } = geom();
   const lx = (x - ox) / ex, ly = (y - oy) / ey;
   const nuevo = Math.min(Math.max(E.vista.zoom * factor, 1), ZOOM_MAX);
@@ -296,8 +304,8 @@ function acercar(factor, x, y) {
   const [AW, AH] = E.demo.trabajo;
   E.vista.zoom = nuevo;
   const nex = r.w / AW * nuevo, ney = r.h / AH * nuevo;
-  E.vista.cx = lx - (x - (r.x + r.w / 2)) / nex;          // el punto bajo el mouse no se mueve
-  E.vista.cy = ly - (y - (r.y + r.h / 2)) / ney;
+  E.vista.cx = lx - (x - (s.x + s.w / 2)) / nex;          // el punto bajo el mouse no se mueve
+  E.vista.cy = ly - (y - (s.y + s.h / 2)) / ney;
   aplicarZoom();
 }
 
@@ -348,7 +356,7 @@ function dibujar(idx) {
   ctx.setTransform(E.dpr, 0, 0, E.dpr, 0, 0);
   ctx.clearRect(0, 0, W, H);
   if (!E.demo) return;
-  const G = geom(), r = E.rect;
+  const G = geom(), r = E.vis;
   ctx.save();
   ctx.beginPath();
   ctx.rect(r.x, r.y, r.w, r.h);
@@ -422,7 +430,7 @@ function dibujarCamiones(camiones) {
   }
   const ocupadas = [];
   ctx.font = "600 11px IBM Plex Sans, sans-serif";
-  const r = E.rect;
+  const r = E.vis;
   for (const c of [...camiones].sort((a, b) => a.y1 - b.y1)) {
     const texto = String(c.pid);
     const ew = ctx.measureText(texto).width + 8, eh = 15;
@@ -527,7 +535,7 @@ function dibujarRegla(G) {
 
 function dibujarGrilla(G) {
   // Grilla en metros (app.py _dibujar_grilla): lineas finas y numeros en los bordes.
-  const geo = E.georef, r = E.rect;
+  const geo = E.georef, r = E.vis;
   const [x0, y0] = aTrabajo(r.x, r.y, G), [x1, y1] = aTrabajo(r.x + r.w, r.y + r.h, G);
   const esquinas = [[x0, y0], [x1, y0], [x0, y1], [x1, y1]].map(([x, y]) => geo.aCoordenadas(...aOriginal(x, y)));
   const emin = Math.min(...esquinas.map((p) => p[0])), emax = Math.max(...esquinas.map((p) => p[0]));
@@ -1142,11 +1150,19 @@ document.querySelectorAll("#seg-velocidad button").forEach((b) => b.addEventList
   toast(`En la demostración el video ya está analizado (modo ${E.demo?.modo}). Elegir la velocidad será parte del modo análisis.`);
 }));
 
-async function exportarExcel() {
-  if (!E.demo) return;
-  if (E.cambiado && !(await confirmar("¿Descargar el Excel del análisis?",
-      "El Excel se generó en la laptop con las zonas y límites originales del análisis. Los cambios que hiciste " +
-      "aquí no aparecen en ese archivo.", "Descargar igual", "Cancelar"))) return;
+// Exportar a Excel: si el visitante no cambio nada, se descarga el Excel que genero la laptop.
+// Si dibujo sus zonas, cambio limites o pidio "hasta el directo", el Excel se arma en SU navegador
+// con el mismo reporte_excel.py (excel_web.js). Nada se sube a ningun servidor.
+function descargarBlob(nombre, blob) {
+  const url = URL.createObjectURL(blob);
+  const a = Object.assign(document.createElement("a"), { href: url, download: nombre });
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+}
+
+function descargarOriginal() {
   const a = Object.assign(document.createElement("a"), { href: E.base + "reporte.xlsx",
                                                           download: `reporte_${E.demo.nombre}.xlsx` });
   document.body.appendChild(a);
@@ -1154,15 +1170,57 @@ async function exportarExcel() {
   a.remove();
   estado("Descargando el reporte Excel…", C.ok);
 }
-$("b-exportar").addEventListener("click", exportarExcel);
-$("b-exportar-res").addEventListener("click", exportarExcel);
+
+function textoBotonesExcel(texto, ocupado) {
+  for (const id of ["b-exportar", "b-exportar-res"]) {
+    const b = $(id), destino = b.querySelector("span") || b;
+    destino.textContent = texto;
+    b.disabled = ocupado;
+    b.setAttribute("aria-busy", String(ocupado));
+  }
+}
+
+async function exportarExcel(desdeResultados = false) {
+  if (!E.demo || E.generandoExcel) return;
+  const hayDirecto = E.iniciado && E.vivo < duracion() - 0.5;
+  const corte = desdeResultados ? corteResultados() : (hayDirecto ? "directo" : "todo");
+  const hasta = corte === "directo" && hayDirecto ? E.vivo : null;
+  if (!E.cambiado && hasta == null) { descargarOriginal(); return; }
+  E.generandoExcel = true;
+  textoBotonesExcel("Preparando…", true);
+  toast(`Preparando tu Excel ${E.cambiado ? "con tus zonas y límites" : `hasta el segundo ${horaCorta(hasta)}`}. ` +
+        "La primera vez tarda unos segundos.", 8000);
+  try {
+    const tablero = await cargarTablero(E.base);
+    const entrada = datosParaExcel({ demo: E.demo, tablero, res: E.res, avisos: E.avisos, zonas: E.zonas,
+                                     limiteGeneral: E.limiteGeneral, hasta, georef: E.georef });
+    const blob = await generarExcel(entrada, (paso) => estado(paso, C.acento));
+    const sufijo = hasta == null ? "" : `_hasta_${horaCorta(hasta).replace(/:/g, "-")}`;
+    descargarBlob(`reporte_${E.demo.nombre}${E.cambiado ? "_mis_zonas" : ""}${sufijo}.xlsx`, blob);
+    estado(`Excel listo: ${hasta == null ? "todo el video" : `hasta el segundo ${horaCorta(hasta)}`}` +
+           `${E.cambiado ? ", con tus zonas y límites" : ""}.`, C.ok);
+    toast("Tu Excel se descargó. Búscalo en tu carpeta de Descargas.", 5000);
+  } catch (error) {
+    console.error(error);
+    if (await confirmar("No se pudo armar tu Excel",
+        "Tu navegador no pudo preparar el Excel con tus datos (puede faltar conexión o memoria). " +
+        "¿Quieres descargar el Excel original del análisis (sin tus zonas)?", "Descargar original", "Cancelar")) {
+      descargarOriginal();
+    } else estado("No se descargó el Excel.", C.suave);
+  } finally {
+    E.generandoExcel = false;
+    textoBotonesExcel("Exportar a Excel", false);
+  }
+}
+$("b-exportar").addEventListener("click", () => exportarExcel(false));
+$("b-exportar-res").addEventListener("click", () => exportarExcel(true));
 
 // ---------------------------------------------------------------- mouse y pantalla tactil
 function posicion(e) {
   const r = capa.getBoundingClientRect();
   return [e.clientX - r.left, e.clientY - r.top];
 }
-const dentroVideo = ([x, y]) => x >= E.rect.x && x <= E.rect.x + E.rect.w && y >= E.rect.y && y <= E.rect.y + E.rect.h;
+const dentroVideo = ([x, y]) => x >= E.vis.x && x <= E.vis.x + E.vis.w && y >= E.vis.y && y <= E.vis.y + E.vis.h;
 
 function actualizarCoordenadas(p) {
   const el = $("t-coord");
@@ -1252,7 +1310,7 @@ capa.addEventListener("pointermove", (e) => {
   if (dib && dib.forma === "Polígono") dib.cursor = aTrabajo(...p);
   if (gs?.tipo === "toque" && E.punteros.has(e.pointerId)) {
     if (Math.abs(p[0] - gs.x) + Math.abs(p[1] - gs.y) > 5) gs.movido = true;
-    if (gs.movido && E.vista.zoom > 1 && (!E.regla || gs.boton === 2) && (!dib || gs.boton === 2)) {
+    if (gs.movido && (E.vista.zoom > 1 || E.llenar) && (!E.regla || gs.boton === 2) && (!dib || gs.boton === 2)) {
       const { ex, ey } = geom();
       E.vista.cx = gs.cx - (p[0] - gs.x) / ex;
       E.vista.cy = gs.cy - (p[1] - gs.y) / ey;
@@ -1398,6 +1456,36 @@ function cambiarPestana(nombre, actualizarDireccion = true) {
     requestAnimationFrame(() => { diseno(); aplicarZoom(); crearRanuras(); });
   }
 }
+$("b-ayuda").addEventListener("click", () => $("dlg-ayuda").showModal());
+
+// ---------------------------------------------------------------- Llenar y pantalla completa
+function alternarLlenar() {
+  E.llenar = !E.llenar;
+  $("b-llenar").setAttribute("aria-pressed", String(E.llenar));
+  $("b-llenar").querySelector("span").textContent = E.llenar ? "Ajustar" : "Llenar";
+  $("b-llenar").setAttribute("aria-label", E.llenar ? "Ajustar" : "Llenar");
+  diseno();
+  aplicarZoom();
+  if (E.llenar) toast("El video llena el espacio. Arrastra para ver lo que quedó fuera; toca Ajustar para verlo entero.");
+}
+$("b-llenar").addEventListener("click", alternarLlenar);
+
+const raizPantalla = document.documentElement;
+const enPantallaCompleta = () => document.fullscreenElement || document.webkitFullscreenElement;
+if (!(document.fullscreenEnabled || document.webkitFullscreenEnabled)) $("b-pantalla").hidden = true;   // iPhone
+$("b-pantalla").addEventListener("click", () => {
+  if (enPantallaCompleta()) (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+  else (raizPantalla.requestFullscreen || raizPantalla.webkitRequestFullscreen).call(raizPantalla)?.catch?.(() =>
+    toast("Tu navegador no permitió la pantalla completa."));
+});
+const alCambiarPantalla = () => {
+  const activa = !!enPantallaCompleta();
+  $("b-pantalla").setAttribute("aria-pressed", String(activa));
+  $("b-pantalla").querySelector("span").textContent = activa ? "Salir (Esc)" : "Pantalla completa";
+  $("b-pantalla").setAttribute("aria-label", activa ? "Salir de pantalla completa" : "Pantalla completa");
+};
+document.addEventListener("fullscreenchange", alCambiarPantalla);
+document.addEventListener("webkitfullscreenchange", alCambiarPantalla);
 $("tab-monitoreo").addEventListener("click", () => cambiarPestana("monitoreo"));
 $("tab-resultados").addEventListener("click", () => cambiarPestana("resultados"));
 $("tab-monitoreo").addEventListener("keydown", (e) => { if (e.key === "ArrowRight") { $("tab-resultados").focus(); cambiarPestana("resultados"); } });

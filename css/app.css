@@ -352,3 +352,19 @@ select { height: 34px; padding: 0 8px; border: 1px solid var(--borde); border-ra
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; }
 }
+
+/* ---- guia rapida ("?") */
+.boton.cuadrado.ayuda { width: 34px; min-width: 34px; height: 34px; font-size: 16px; font-weight: 700; border-radius: 50%; }
+.ayuda-dlg { width: min(460px, calc(100vw - 32px)); }
+.pasos-ayuda { margin: 10px 0 6px; padding-left: 22px; display: grid; gap: 9px; font-size: 13.5px; line-height: 1.45; }
+.pasos-ayuda li::marker { color: var(--acento); font-weight: 700; }
+.ayuda-dlg .suave { font-size: 12.5px; }
+
+/* ---- Llenar / Pantalla completa */
+.mini { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; border: 1px solid var(--borde);
+  border-radius: 8px; background: var(--tarjeta); color: var(--texto); font: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer; }
+.mini svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.mini:hover { border-color: var(--acento); }
+.mini[aria-pressed="true"] { background: var(--acento); border-color: var(--acento); color: var(--texto-acento); }
+.fila-controles .izq { flex-wrap: wrap; }
+@media (max-width: 560px) { .mini { width: 36px; height: 34px; padding: 0; justify-content: center; } .mini span { display: none; } .mini svg { width: 17px; height: 17px; } }

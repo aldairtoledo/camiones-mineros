@@ -18,6 +18,7 @@ export function hms(segundos) {                // _hms de reporte_excel.py
     : `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 }
 const f0 = (v) => Number(v || 0).toFixed(0);
+const r2 = (v) => Math.round(v * 100) / 100;
 const miles0 = (v) => Math.round(v).toString().replace(/\B(?=(\d{3})+(?!\d))/g, " ");
 
 /**
@@ -74,8 +75,9 @@ export function calcularResultados({ demo, tablero, res, avisos, zonas, limiteGe
       }
     }
   }
-  const nExcesos = new Map();
+  const nExcesos = new Map(), tExceso = new Map();
   for (const e of res.excesos) if (e.t <= T + 1e-6) nExcesos.set(e.pid, (nExcesos.get(e.pid) || 0) + 1);
+  for (const [t, pid, dt] of res.tramosExceso || []) if (t <= T + 1e-6) tExceso.set(pid, (tExceso.get(pid) || 0) + dt);
   const estimadas = new Map(), totalMuestras = new Map();
   for (const f of tray) {
     totalMuestras.set(f.id_camion, (totalMuestras.get(f.id_camion) || 0) + 1);
@@ -103,6 +105,7 @@ export function calcularResultados({ demo, tablero, res, avisos, zonas, limiteGe
       tiempo_visible_s: tVis, tiempo_detenido_s: tDet, tiempo_en_movimiento_s: tMov,
       porcentaje_detenido: tVis > 0 ? Math.round(1000 * tDet / tVis) / 10 : 0,
       distancia_px: dPx,
+      velocidad_media_en_movimiento_px_s: tMov > 0 ? Math.round(10 * dPx / tMov) / 10 : 0,
       porcentaje_posiciones_estimadas: tot ? Math.round(1000 * (estimadas.get(pid) || 0) / tot) / 10 : 0,
     };
     if (metros) {
@@ -110,14 +113,16 @@ export function calcularResultados({ demo, tablero, res, avisos, zonas, limiteGe
       fila.velocidad_media_en_movimiento_km_h = tMov > 0 ? Math.round(10 * (dM ?? 0) / tMov * 3.6) / 10 : 0;
       fila.velocidad_maxima_km_h = Math.round(10 * (velMax.get(pid) || 0)) / 10;
       fila.veces_sobre_el_limite = nExcesos.get(pid) || 0;
+      fila.tiempo_sobre_el_limite_s = Math.round(10 * (tExceso.get(pid) || 0)) / 10;
     }
     zonas.forEach((_, z) => {
       const ents = entradas.get(clave(pid, z)) || [];
       const p = permT.get(clave(pid, z)) || [];
       fila[`entradas_Z${z + 1}`] = ents.length;
-      fila[`tiempo_total_en_Z${z + 1}_s`] = p.reduce((s, v) => s + v, 0);
+      fila[`tiempo_total_en_Z${z + 1}_s`] = r2(p.reduce((s, v) => s + v, 0));
+      fila[`permanencia_prom_Z${z + 1}_s`] = p.length ? r2(p.reduce((s, v) => s + v, 0) / p.length) : null;
       const ciclos = ents.slice(1).map((t, i) => t - ents[i]);
-      fila[`ciclo_prom_Z${z + 1}_s`] = ciclos.length ? ciclos.reduce((s, v) => s + v, 0) / ciclos.length : null;
+      fila[`ciclo_prom_Z${z + 1}_s`] = ciclos.length ? r2(ciclos.reduce((s, v) => s + v, 0) / ciclos.length) : null;
     });
     const primeraT = fila.primera_aparicion_s;
     fila.como = primeraT <= 2.0 ? "Al inicio del video" : ingresos.has(pid) ? "Entró por el borde" : "Apareció en la imagen";
@@ -252,7 +257,9 @@ export function calcularResultados({ demo, tablero, res, avisos, zonas, limiteGe
 
   const datos = { camiones, detenciones, zonas: zonasRes, alertas: avisosT, metros, limiteGeneral, salidas, ingresos, detPorCamion };
   return { T, completo: hasta == null, tray, camiones, detenciones, reparto, zonas: zonasRes, ocupacion, paso, flujo,
-           conteoAvisos, bitacora, kpis, hallazgos: hallazgos(datos), metros, ejeX, ejeY };
+           conteoAvisos, bitacora, kpis, hallazgos: hallazgos(datos), metros, ejeX, ejeY,
+           // para armar el Excel con los datos del visitante (excel_web.js)
+           excel: { eventos: ev, abiertas, tFinal, muestras: muestrasT, avisos: avisosT, nombreZona } };
 }
 
 // ---------------- hallazgos (reporte_excel._hallazgos, mismas frases)
@@ -295,7 +302,7 @@ function hallazgos(d) {
   if (zs.length) {
     const z = zs.reduce((m, x) => ((x.ocupacion_maxima > m.ocupacion_maxima ||
       (x.ocupacion_maxima === m.ocupacion_maxima && (x.ocupacion_promedio || 0) > (m.ocupacion_promedio || 0))) ? x : m), zs[0]);
-    h.push(`La zona con más camiones a la vez fue ${z.nombre_zona}: hasta ${z.ocupacion_maxima} camiones ` +
+    h.push(`La zona con más camiones a la vez fue ${z.nombre_zona}: hasta ${z.ocupacion_maxima} ${z.ocupacion_maxima === 1 ? "camión" : "camiones"} ` +
            `(en promedio ${(z.ocupacion_promedio || 0).toFixed(1)}).`);
   }
   if (d.metros && cam.length) {
@@ -316,7 +323,8 @@ function hallazgos(d) {
   if (d.salidas.size) {
     const alInicio = new Set(cam.filter((c) => (c.primera_aparicion_s || 0) <= 2.0).map((c) => c.id_camion));
     const nuevos = [...d.ingresos.keys()].filter((p) => !alInicio.has(p)).sort((a, b) => a - b);
-    let texto = `${d.salidas.size} camión(es) salieron de la imagen (${[...d.salidas.keys()].sort((a, b) => a - b).join(", ")})`;
+    const n = d.salidas.size;
+    let texto = `${n} ${n === 1 ? "camión salió" : "camiones salieron"} de la imagen (${[...d.salidas.keys()].sort((a, b) => a - b).join(", ")})`;
     if (nuevos.length) texto += `; los que entraron por el borde recibieron un número nuevo (${nuevos.join(", ")})`;
     h.push(texto + ".");
   }

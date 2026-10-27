@@ -155,6 +155,7 @@ export function recalcular(demo, cfg) {
   let ultimaMuestra = null;
   const muestras = [];          // {n, t, presentes: Map pid -> [zonas dentro], ocupacion: [por zona]}
   const excesos = [];           // {t, pid, kmh, limite, zona}: cada vez que motor.est["excesos"] sube
+  const tramosExceso = [];      // [t, pid, dt]: cada tramo en que el camion iba sobre el limite
 
   const avisar = (t, tipo, pid, titulo, detalle, extra, zona, corto) => {
     const clave = `${tipo}|${pid}|${extra}`;
@@ -254,6 +255,7 @@ export function recalcular(demo, cfg) {
           continue;
         }
         e.t_exceso += Math.max(0, dt);
+        if (dt > 0) tramosExceso.push([t, pid, dt]);       // para cortar el tiempo sobre el limite en T
         if (!excesoDesde.has(pid)) excesoDesde.set(pid, t);
         const inicio = excesoDesde.get(pid);
         if (t - inicio >= 1.0 && !excesoAvisado.has(pid)) {
@@ -282,7 +284,7 @@ export function recalcular(demo, cfg) {
     limites[i] = filas.map((f) => limiteActual.get(f[0]) || [null, null]);
     recorrido[i] = filas.map((f) => (geo ? dist.get(f[0]) || 0 : null));
   }
-  return { Z, conteos, limites, recorrido, avisos, eventosZona, estadisticas: est, muestras, excesos };
+  return { Z, conteos, limites, recorrido, avisos, eventosZona, estadisticas: est, muestras, excesos, tramosExceso };
 }
 
 /** Avisos a mostrar: los del analisis, con los de zonas y limites recalculados si algo cambio. */
