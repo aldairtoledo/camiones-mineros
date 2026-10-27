@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Detección de Camiones Mineros</title>
+  <meta name="description" content="Detección y seguimiento de camiones mineros con visión artificial. Laboratorio de Software Minero, UNI.">
+  <meta name="theme-color" content="#12151A">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23F2A900'/%3E%3Cpath d='M5 11h13l3 6H5z M21 13h3.5l2.5 3.2V20H21z' fill='%2314171C'/%3E%3Crect x='5' y='17' width='22' height='3' fill='%2314171C'/%3E%3Ccircle cx='10' cy='22' r='2.6' fill='%2314171C'/%3E%3Ccircle cx='22.5' cy='22' r='2.6' fill='%2314171C'/%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+<div class="app" id="app">
+
+  <!-- ============ PANEL LATERAL ============ -->
+  <aside class="lateral" id="lateral" aria-label="Panel de control">
+    <div class="marca">
+      <svg class="marca-icono" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#F2A900"/><path d="M5 11h13l3 6H5z" fill="#14171C"/><path d="M21 13h3.5l2.5 3.2V20H21z" fill="#14171C"/><rect x="5" y="17" width="22" height="3" fill="#14171C"/><circle cx="10" cy="22" r="2.6" fill="#14171C"/><circle cx="10" cy="22" r="1" fill="#F2A900"/><circle cx="22.5" cy="22" r="2.6" fill="#14171C"/><circle cx="22.5" cy="22" r="1" fill="#F2A900"/></svg>
+      <div>
+        <p class="marca-titulo">Detección de<br>Camiones Mineros</p>
+        <p class="marca-sub">Laboratorio de Software Minero · UNI</p>
+      </div>
+      <button class="cerrar-lateral" id="b-cerrar-lateral" aria-label="Cerrar panel">✕</button>
+    </div>
+
+    <section class="seccion">
+      <h2>VIDEO</h2>
+      <button class="boton" id="b-abrir">Abrir video</button>
+      <button class="boton" id="b-reiniciar">↺&nbsp; Reiniciar</button>
+    </section>
+
+    <section class="seccion">
+      <h2>ZONAS DE CONTROL</h2>
+      <p class="paso">1.&nbsp; Tipo de zona</p>
+      <div class="segmentado" id="seg-tipo" role="radiogroup" aria-label="Tipo de zona">
+        <button role="radio" aria-checked="true" data-tipo="acumulativa" class="activo">Acumulativa</button>
+        <button role="radio" aria-checked="false" data-tipo="dinamica">Dinámica</button>
+      </div>
+      <p class="nota" id="t-desc-tipo">Cuenta cuántos camiones pasan.</p>
+      <p class="paso">2.&nbsp; Dibujar con</p>
+      <div class="rejilla-formas">
+        <button class="boton forma" data-forma="Rectángulo"><span aria-hidden="true">▭</span> Rectángulo</button>
+        <button class="boton forma" data-forma="Polígono"><span aria-hidden="true">⬠</span> Polígono</button>
+        <button class="boton forma" data-forma="Círculo"><span aria-hidden="true">◯</span> Círculo</button>
+        <button class="boton forma" data-forma="Libre"><span aria-hidden="true">✎</span> Libre</button>
+      </div>
+      <p class="ayuda" id="t-ayuda">Elige el tipo de zona y luego una forma para dibujar sobre el video.</p>
+      <div class="fila2">
+        <button class="boton" id="b-deshacer">↶&nbsp; Deshacer</button>
+        <button class="boton" id="b-borrar">Borrar todo</button>
+      </div>
+      <div class="fila2">
+        <button class="boton" id="b-guardar-zonas">Guardar zonas</button>
+        <button class="boton" id="b-cargar-zonas">Cargar zonas</button>
+      </div>
+      <button class="enlace" id="b-zonas-originales" hidden>Volver a las zonas del análisis</button>
+    </section>
+
+    <section class="seccion">
+      <h2>COORDENADAS</h2>
+      <button class="boton" id="b-calibracion">⌖&nbsp; Ver calibración</button>
+      <p class="nota" id="t-calibracion"></p>
+    </section>
+
+    <section class="seccion">
+      <h2>LÍMITE DE VELOCIDAD</h2>
+      <label class="fila-limite">
+        <span>General</span>
+        <input id="e-limite" type="text" inputmode="decimal" placeholder="—" autocomplete="off" aria-label="Límite general en km/h">
+        <span class="suave">km/h</span>
+      </label>
+      <p class="nota">Vacío = sin límite. Para un límite distinto en una zona, usa el ✎ de su tarjeta.</p>
+    </section>
+
+    <section class="seccion">
+      <h2>VELOCIDAD DE ANÁLISIS</h2>
+      <div class="segmentado acento" id="seg-velocidad" role="radiogroup" aria-label="Velocidad de análisis">
+        <button role="radio" data-modo="Precisión">Precisión</button>
+        <button role="radio" data-modo="Equilibrado">Equilibrado</button>
+        <button role="radio" data-modo="Rápido">Rápido</button>
+      </div>
+      <p class="nota">Precisión: analiza todos los cuadros.<br>Equilibrado: 4 de cada 5.<br>Rápido: 2 de cada 3.</p>
+    </section>
+
+    <section class="seccion">
+      <h2>DATOS</h2>
+      <button class="boton" id="b-exportar">Exportar a Excel</button>
+    </section>
+
+    <p class="pie-lateral" id="t-pie"></p>
+  </aside>
+  <div class="velo" id="velo" hidden></div>
+
+  <!-- ============ AREA PRINCIPAL ============ -->
+  <main class="area">
+    <header class="barra-sup">
+      <button class="boton cuadrado" id="b-panel" aria-label="Mostrar u ocultar el panel">☰</button>
+      <div class="titulo">
+        <h1 id="t-video">Cargando…</h1>
+        <p id="t-estado" class="estado"></p>
+      </div>
+      <div class="vistas" role="tablist" aria-label="Secciones">
+        <button role="tab" id="tab-monitoreo" aria-selected="true" aria-controls="vista-monitoreo">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="12" rx="2"/><path d="M8 21h8M12 17v4"/></svg>Monitoreo</button>
+        <button role="tab" id="tab-resultados" aria-selected="false" aria-controls="vista-resultados">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>Resultados</button>
+      </div>
+      <div class="herramientas" role="toolbar" aria-label="Herramientas del video">
+        <button class="boton" id="b-vel" aria-pressed="false">◷&nbsp; Velocidades</button>
+        <button class="boton" id="b-regla" aria-pressed="false">↔&nbsp; Medir distancia</button>
+        <button class="boton" id="b-grilla" aria-pressed="false">▦&nbsp; Mostrar grilla</button>
+        <button class="boton" id="b-conteo">Ocultar conteo</button>
+      </div>
+    </header>
+
+    <div class="vista-monitoreo" id="vista-monitoreo" role="tabpanel" aria-labelledby="tab-monitoreo">
+    <div class="escena">
+      <div class="marco-video" id="marco">
+        <div class="recorte" id="recorte"><video id="video" muted playsinline preload="auto"></video></div>
+        <canvas id="capa" aria-label="Video con las cajas de los camiones, sus números y las zonas"></canvas>
+        <div class="ficha" id="ficha" hidden></div>
+        <div class="mensaje-video" id="mensaje-video">Cargando la demostración…</div>
+      </div>
+
+      <aside class="panel-conteo" id="panel-conteo" aria-label="Conteo en vivo">
+        <h2>CONTEO EN VIVO</h2>
+        <div class="tarjetas-conteo" id="tarjetas-conteo"></div>
+        <p class="sin-zonas" id="t-sin-zonas" hidden>Crea una zona para ver<br>su conteo aquí.</p>
+        <div class="en-pantalla">
+          <span>Camiones en pantalla</span>
+          <strong id="t-activos">0</strong>
+        </div>
+      </aside>
+    </div>
+
+    <footer class="barra-inf">
+      <canvas id="linea" class="linea" aria-label="Línea de tiempo con los avisos"></canvas>
+      <div class="fila-controles">
+        <div class="izq">
+          <span id="t-tiempo" class="tiempo">0:00 / 0:00</span>
+          <span id="t-coord" class="coord"></span>
+          <button class="zoom" id="b-zoom" hidden></button>
+        </div>
+        <div class="controles">
+          <button class="boton primario" id="b-pausa">▶&nbsp; Iniciar</button>
+          <button class="boton" id="b-atras10">⏪ 10 s</button>
+          <button class="boton" id="b-atras5">⏪ 5 s</button>
+          <button class="boton" id="b-adelante5">5 s ⏩</button>
+          <button class="boton directo" id="b-directo">●&nbsp; En directo</button>
+        </div>
+      </div>
+      <div class="avisos" id="avisos" aria-live="polite"></div>
+    </footer>
+    </div>
+
+    <!-- ============ RESULTADOS ============ -->
+    <section class="vista-resultados" id="vista-resultados" role="tabpanel" aria-labelledby="tab-resultados" hidden>
+      <div class="res-cabecera">
+        <div>
+          <h2 id="res-titulo">Resultados del análisis</h2>
+          <p class="suave" id="res-sub"></p>
+        </div>
+        <div class="res-acciones">
+          <div class="segmentado acento" id="seg-corte" role="radiogroup" aria-label="Periodo de los resultados">
+            <button role="radio" data-corte="directo" id="b-corte-directo">Hasta el directo</button>
+            <button role="radio" data-corte="todo">Todo el video</button>
+          </div>
+          <button class="boton primario" id="b-exportar-res">
+            <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11m0 0-4-4m4 4 4-4M5 20h14"/></svg>Exportar a Excel</button>
+        </div>
+      </div>
+      <p class="nota-res" id="res-nota" hidden></p>
+      <div class="kpis" id="res-kpis"></div>
+
+      <div class="res-dos">
+        <article class="tarjeta-res">
+          <h3>Lo más importante</h3>
+          <p class="como">Conclusiones escritas automáticamente con los datos del análisis.</p>
+          <ul class="hallazgos" id="res-hallazgos"></ul>
+        </article>
+        <article class="tarjeta-res">
+          <h3>Flujo del circuito</h3>
+          <p class="como">Recorrido de los camiones por las etapas de la operación: cuántos pasaron por cada una y cuánto tiempo estuvieron ahí.</p>
+          <div id="res-flujo"></div>
+        </article>
+      </div>
+
+      <div class="res-graficas" id="res-graficas"></div>
+
+      <article class="tarjeta-res">
+        <div class="cab-tabla">
+          <h3>Tablas de datos</h3>
+          <div class="segmentado" id="seg-tabla" role="tablist" aria-label="Tabla">
+            <button role="tab" data-tabla="camiones" class="activo">Camiones</button>
+            <button role="tab" data-tabla="detenciones">Detenciones</button>
+            <button role="tab" data-tabla="zonas">Zonas</button>
+            <button role="tab" data-tabla="bitacora">Bitácora</button>
+          </div>
+        </div>
+        <p class="como" id="res-tabla-ayuda"></p>
+        <div class="envoltura-tabla"><table class="tabla" id="res-tabla"></table></div>
+      </article>
+
+      <article class="tarjeta-res">
+        <h3>Glosario</h3>
+        <dl class="glosario" id="res-glosario"></dl>
+      </article>
+    </section>
+  </main>
+</div>
+
+<!-- ============ VENTANAS ============ -->
+<dialog id="dlg-zona" class="dialogo">
+  <form method="dialog" id="form-zona">
+    <div class="dlg-cab"><span class="punto" id="dlg-zona-color"></span><h3 id="dlg-zona-titulo">Nombre para la Zona 1</h3></div>
+    <p class="suave">Ejemplo: Chancadora, Cola, Curva norte. Puedes dejarlo vacío.</p>
+    <input id="dlg-zona-nombre" type="text" maxlength="40" autocomplete="off">
+    <label class="fila-limite">
+      <span><strong>Límite de velocidad en esta zona</strong></span>
+      <input id="dlg-zona-limite" type="text" inputmode="decimal" placeholder="—" autocomplete="off">
+      <span class="suave">km/h</span>
+    </label>
+    <p class="suave pequeno">Opcional. Si lo dejas vacío, rige el límite general.</p>
+    <label class="fila-limite">
+      <span><strong>Esta zona es</strong></span>
+      <select id="dlg-zona-rol">
+        <option value="">Otra (sin papel)</option>
+        <option value="via">Vía</option>
+        <option value="cola">Cola</option>
+        <option value="carguio">Carguío (pala)</option>
+        <option value="chancadora">Chancadora</option>
+      </select>
+    </label>
+    <p class="suave pequeno">Opcional. Sirve para el "Flujo del circuito" de Resultados.</p>
+    <div class="dlg-botones">
+      <button type="button" class="boton" id="dlg-zona-omitir">Omitir</button>
+      <button type="submit" class="boton primario" value="guardar">Guardar</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="dlg-videos" class="dialogo">
+  <div class="dlg-cab"><h3>Videos de demostración</h3></div>
+  <p class="suave">Estos videos ya fueron analizados en la laptop del laboratorio. Subir un video propio será parte del modo análisis.</p>
+  <div id="lista-videos" class="lista-videos"></div>
+  <div class="dlg-botones"><button class="boton" data-cerrar>Cerrar</button></div>
+</dialog>
+
+<dialog id="dlg-calibracion" class="dialogo">
+  <div class="dlg-cab"><h3>Calibración del video</h3></div>
+  <div id="calib-contenido"></div>
+  <div class="dlg-botones"><button class="boton primario" data-cerrar>Entendido</button></div>
+</dialog>
+
+<dialog id="dlg-confirmar" class="dialogo">
+  <div class="dlg-cab"><span class="icono-alerta" aria-hidden="true">!</span><h3 id="conf-titulo"></h3></div>
+  <p id="conf-texto"></p>
+  <div class="dlg-botones">
+    <button class="boton" id="conf-si"></button>
+    <button class="boton primario" id="conf-no"></button>
+  </div>
+</dialog>
+
+<div class="toast" id="toast" role="status" hidden></div>
+<input type="file" id="f-zonas" accept=".json,application/json" hidden>
+
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
