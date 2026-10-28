@@ -11,6 +11,7 @@ export class Detector {
     return new Detector(ort, s);
   }
   async detectar(fuente, W, H, conf = 0.25, iou = 0.7) {
+    const t0 = performance.now();
     const r = Math.min(640 / W, 640 / H), nw = Math.round(W * r), nh = Math.round(H * r);
     const l = Math.floor((640 - nw) / 2), t = Math.floor((640 - nh) / 2);
     const c = this.c;
@@ -19,7 +20,9 @@ export class Detector {
     const px = c.getImageData(0, 0, 640, 640).data, d = this.datos, N = 640 * 640;
     for (let i = 0, j = 0; i < N; i++, j += 4) { d[i] = px[j] / 255; d[i + N] = px[j + 1] / 255; d[i + 2 * N] = px[j + 2] / 255; }
     const ent = new this.ort.Tensor("float32", d, [1, 3, 640, 640]);
+    const t1 = performance.now();
     const sal = (await this.s.run({ images: ent })).output0;
+    const t2 = performance.now();
     const o = sal.data, M = sal.dims[2];
     let cand = [];
     for (let k = 0; k < M; k++) {
@@ -33,6 +36,7 @@ export class Detector {
       for (let j = 0; j < i; j++) if (probiou(cand[j], cand[i]) >= iou) { ok = false; break; }
       if (ok) quedan.push(cand[i]);
     }
+    this.tiempos = { preparar: t1 - t0, modelo: t2 - t1, final: performance.now() - t2 };
     return quedan.map(([cx, cy, w, h, a, s]) => [(cx - l) / r, (cy - t) / r, w / r, h / r, a, s]);
   }
 }
