@@ -52,7 +52,7 @@
 const local = new URLSearchParams(location.search).has("local");
 const base = local ? new URL("./ort/", location.href).href : "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.30.0/dist/";
 const ort = await import(base + "ort.all.min.mjs");
-import { Detector } from "./js/detector.js";
+import { Detector } from "./js/detector.js?v=3";
 ort.env.wasm.wasmPaths = base;
 ort.env.wasm.numThreads = 1;
 const $ = (id) => document.getElementById(id);
@@ -127,7 +127,8 @@ async function bucle() {
     $("d-fps").textContent = (1000 / prom).toFixed(1);
     $("d-cam").textContent = cajas.length;
     const e = det.tiempos;
-    $("detalle").textContent = `Detalle: preparar imagen ${Math.round(e.preparar)} ms · modelo ${Math.round(e.modelo)} ms · resultado ${Math.round(e.final)} ms`;
+    $("detalle").textContent = e ? `Detalle: preparar imagen ${Math.round(e.preparar)} ms · modelo ${Math.round(e.modelo)} ms · resultado ${Math.round(e.final)} ms`
+                                 : "Detalle: falta subir el detector.js nuevo a la carpeta js de GitHub.";
     await new Promise((r) => setTimeout(r, 0));
   }
 }
