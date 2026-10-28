@@ -206,6 +206,7 @@ function iniciarVideo(demo) {
   video.addEventListener("loadeddata", () => {
     $("mensaje-video").hidden = true;
     estado("Demostración lista. Presiona Iniciar para ver el análisis.", C.ok);
+    vistaPrevia();
   }, { once: true });
   video.addEventListener("error", () => {
     $("mensaje-video").hidden = false;
@@ -279,6 +280,38 @@ function pausar() {
   actualizarBotones();
 }
 
+// Algunos videos empiezan con un instante en negro: mientras no se presiona Iniciar, se muestra
+// el primer cuadro con imagen (al iniciar, el video vuelve al segundo 0 y se ve completo).
+async function vistaPrevia() {
+  if (E.iniciado || !video.videoWidth) return;
+  const lienzo = document.createElement("canvas");
+  lienzo.width = 32; lienzo.height = 18;
+  const c = lienzo.getContext("2d", { willReadFrequently: true });
+  const oscuro = () => {
+    c.drawImage(video, 0, 0, 32, 18);
+    const d = c.getImageData(0, 0, 32, 18).data;
+    let suma = 0;
+    for (let i = 0; i < d.length; i += 4) suma += 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+    return suma / (d.length / 4) < 12;
+  };
+  const ir = (t) => new Promise((ok) => {
+    const listo = () => { clearTimeout(tope); ok(); };
+    const tope = setTimeout(() => { video.removeEventListener("seeked", listo); ok(); }, 1500);
+    video.addEventListener("seeked", listo, { once: true });
+    video.currentTime = t;
+  });
+  try {
+    if (!oscuro()) return;
+    for (let t = 0.25; t <= Math.min(6, duracion() - 0.1); t += 0.25) {
+      if (E.iniciado) return;
+      await ir(t);
+      if (E.iniciado) return;
+      if (!oscuro()) return;
+    }
+    if (!E.iniciado) await ir(0);                        // todo negro: se deja como estaba
+  } catch { /* imagen de otro servidor sin permiso de lectura: se deja el cuadro 0 */ }
+}
+
 function reiniciar() {
   if (!E.demo) return;
   video.pause();
@@ -289,6 +322,7 @@ function reiniciar() {
   E.tAvisos = 0;
   estado("Listo para iniciar. Puedes modificar las zonas.", C.suave);
   actualizarBotones();
+  video.addEventListener("seeked", () => vistaPrevia(), { once: true });
 }
 
 function actualizarBotones() {
