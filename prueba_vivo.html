@@ -43,6 +43,8 @@
     <div class="dato"><b id="d-fps">—</b><span>Cuadros analizados por segundo</span></div>
     <div class="dato"><b id="d-cam">—</b><span>Camiones en pantalla</span></div>
   </div>
+  <p id="detalle" style="font-size:13px"></p>
+  <p style="font-size:13px">Comparar: <a style="color:#4DA3FF" href="?motor=wasm">usar solo el procesador</a> · <a style="color:#4DA3FF" href="?motor=webgpu">usar la tarjeta gráfica</a></p>
   <p id="estado">Cargando el modelo (10 MB, solo la primera vez)…</p>
   <video id="video" playsinline muted loop></video>
 </main>
@@ -55,6 +57,7 @@ ort.env.wasm.wasmPaths = base;
 ort.env.wasm.numThreads = 1;
 const $ = (id) => document.getElementById(id);
 const video = $("video"), lienzo = $("lienzo"), c = lienzo.getContext("2d");
+const copia = document.createElement("canvas"), cc = copia.getContext("2d");
 let det = null, motor = "", corriendo = false, flujo = null;
 
 async function cargar() {
@@ -85,30 +88,47 @@ async function empezar(fuente) {
 }
 function parar() {
   corriendo = false;
+  ultimas = [];
   if (flujo) { flujo.getTracks().forEach((t) => t.stop()); flujo = null; }
   video.pause();
   $("b-parar").disabled = true;
 }
 
 const tiempos = [];
+let ultimas = [];                                        // cajas de la ultima deteccion
+// Dos ciclos independientes: (1) se dibuja el video a velocidad normal (fluido) con las
+// ultimas cajas encima; (2) se detecta tan rapido como pueda la computadora.
+function dibujar() {
+  if (!corriendo) return;
+  const W = video.videoWidth, H = video.videoHeight;
+  if (W) {
+    if (lienzo.width !== W || lienzo.height !== H) { lienzo.width = copia.width = W; lienzo.height = copia.height = H; }
+    c.drawImage(video, 0, 0, W, H);
+    c.lineWidth = Math.max(3, W / 480);
+    c.strokeStyle = "#4CD964";
+    for (const [x, y, w, h, a] of ultimas) { c.save(); c.translate(x, y); c.rotate(a); c.strokeRect(-w / 2, -h / 2, w, h); c.restore(); }
+  }
+  requestAnimationFrame(dibujar);
+}
 async function bucle() {
+  requestAnimationFrame(dibujar);
   while (corriendo) {
     const W = video.videoWidth, H = video.videoHeight;
     if (!W) { await new Promise((r) => setTimeout(r, 100)); continue; }
-    if (lienzo.width !== W || lienzo.height !== H) { lienzo.width = W; lienzo.height = H; }
+    if (copia.width !== W || copia.height !== H) { copia.width = W; copia.height = H; }
     const t0 = performance.now();
-    c.drawImage(video, 0, 0, W, H);                       // el cuadro que se analiza
-    const cajas = await det.detectar(lienzo, W, H);
+    cc.drawImage(video, 0, 0, W, H);                      // el cuadro que se analiza
+    const cajas = await det.detectar(copia, W, H);
     const ms = performance.now() - t0;
+    ultimas = cajas;
     tiempos.push(ms); if (tiempos.length > 20) tiempos.shift();
-    c.lineWidth = Math.max(2, W / 640);
-    c.strokeStyle = "#4CD964";
-    for (const [x, y, w, h, a] of cajas) { c.save(); c.translate(x, y); c.rotate(a); c.strokeRect(-w / 2, -h / 2, w, h); c.restore(); }
     const prom = tiempos.reduce((s, v) => s + v, 0) / tiempos.length;
     $("d-ms").textContent = Math.round(prom);
     $("d-fps").textContent = (1000 / prom).toFixed(1);
     $("d-cam").textContent = cajas.length;
-    await new Promise((r) => requestAnimationFrame(r));
+    const e = det.tiempos;
+    $("detalle").textContent = `Detalle: preparar imagen ${Math.round(e.preparar)} ms · modelo ${Math.round(e.modelo)} ms · resultado ${Math.round(e.final)} ms`;
+    await new Promise((r) => setTimeout(r, 0));
   }
 }
 
