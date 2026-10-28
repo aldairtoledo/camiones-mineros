@@ -44,6 +44,7 @@
     <div class="dato"><b id="d-cam">—</b><span>Camiones en pantalla</span></div>
   </div>
   <p id="detalle" style="font-size:13px"></p>
+  <p id="d-tarjeta" style="font-size:13px"></p>
   <p style="font-size:13px">Comparar: <a style="color:#4DA3FF" href="?motor=wasm">usar solo el procesador</a> · <a style="color:#4DA3FF" href="?motor=webgpu">usar la tarjeta gráfica</a></p>
   <p id="estado">Cargando el modelo (10 MB, solo la primera vez)…</p>
   <video id="video" playsinline muted loop></video>
@@ -65,6 +66,15 @@ async function cargar() {
   const lista = opciones ? [opciones] : (navigator.gpu ? ["webgpu", "wasm"] : ["wasm"]);
   for (const p of lista) {
     try {
+      if (p === "webgpu") {
+        // En laptops con dos tarjetas (Intel + NVIDIA) se pide la de alto rendimiento.
+        const adaptador = await navigator.gpu.requestAdapter({ powerPreference: "high-performance" });
+        if (!adaptador) throw new Error("sin tarjeta grafica");
+        try { ort.env.webgpu.adapter = adaptador; } catch { /* version sin esta opcion */ }
+        try { ort.env.webgpu.powerPreference = "high-performance"; } catch { /* idem */ }
+        const i = adaptador.info || {};
+        $("d-tarjeta").textContent = `Tarjeta que usa el navegador: ${[i.vendor, i.architecture, i.description].filter(Boolean).join(" · ") || "desconocida"}`;
+      }
       det = await Detector.crear(ort, "datos/best_obb_v2.onnx", [p]);
       motor = p === "webgpu" ? "Tarjeta gráfica (WebGPU)" : "Procesador (WASM)";
       $("d-motor").textContent = p === "webgpu" ? "GPU" : "CPU";
