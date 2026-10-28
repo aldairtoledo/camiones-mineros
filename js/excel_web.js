@@ -66,13 +66,11 @@ export function datosParaExcel({ demo, tablero, res, avisos, zonas, limiteGenera
   const editada = !!georef?.info?.editada_web;
   const base = (tablero.parametros || []).filter(([k]) => !fuera.test(k) && !(editada && /^Georreferencia/.test(k)));
   if (editada) {
-    const i = georef.info;
     base.push(["Georreferencia", "calibrada en la página web por el visitante"],
-              ["Georreferencia - Metodo", "Plano local: origen (0; 0) en la esquina inferior izquierda, X a la derecha, Y hacia arriba"],
-              ["Georreferencia - Escala calibrada con", i.fuente || "-"],
-              ["Georreferencia - Escala (m por pixel)", Math.round(georef.escalaMPx * 1e4) / 1e4],
-              ["Georreferencia - Precision de distancias (%)", i.incertidumbre_escala_pct ?? "-"],
-              ...(i.distancias || []).map((d, k) => [`Georreferencia - Distancia D${k + 1} (m)`, d[4]]));
+              ...georef.descripcion().map(([k, v]) => [`Georreferencia - ${k}`, v]));
+    if (georef.esPlano() && georef.info.incertidumbre_escala_pct != null) {
+      base.push(["Georreferencia - Precision de distancias (%)", georef.info.incertidumbre_escala_pct]);
+    }
   }
   const ahora = new Date();
   const fecha = `${ahora.getFullYear()}-${String(ahora.getMonth() + 1).padStart(2, "0")}-${String(ahora.getDate()).padStart(2, "0")} ` +

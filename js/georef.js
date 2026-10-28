@@ -94,6 +94,46 @@ export class Georreferencia {
   }
   errorMedible() { return this.puntos.length >= 4; }
   aDict() { return { puntos: this.puntos, info: this.info }; }
+
+  /** Filas para la hoja Parametros del Excel (georreferencia.descripcion). */
+  descripcion() {
+    const r4 = (v) => Math.round(v * 1e4) / 1e4;
+    if (this.esPlano()) {
+      const i = this.info, [e0, n0] = this.origenPlano();
+      const filas = [["Metodo", "Plano local: origen (0; 0) en la esquina inferior izquierda, X a la derecha, Y hacia arriba"],
+                     ["Escala calibrada con", i.fuente || "-"],
+                     ["Escala (m por pixel)", r4(this.escalaMPx)],
+                     ["Largo del camion usado (m)", i.largo_m ?? "-"],
+                     ["Ancho del camion usado (m)", i.ancho_m || "-"],
+                     ["Largo medido en el video (px)", i.largo_px ?? "-"],
+                     ["Camiones medidos", i.camiones_medidos ?? "-"],
+                     ["Precision aproximada de posicion (m)", i.precision_m ?? "-"],
+                     ["Coordenadas del origen (E, N)", `${e0.toFixed(2)}, ${n0.toFixed(2)}`]];
+      (i.distancias || []).forEach(([x1, y1, x2, y2, m], k) => filas.push([`Distancia conocida ${k + 1}`,
+        `(${x1.toFixed(0)}, ${y1.toFixed(0)}) a (${x2.toFixed(0)}, ${y2.toFixed(0)}) px = ${m.toFixed(2)} m`]));
+      return filas;
+    }
+    const filas = [["Metodo", this.metodo],
+                   ["Error medio de los puntos de control (m)", this.errorMedible() ? Math.round(this.errorM * 1000) / 1000
+                     : "no se puede medir con 2 o 3 puntos (usa 4 o mas)"],
+                   ["Escala aproximada (m por pixel)", r4(this.escalaMPx)]];
+    this.puntos.forEach(([x, y, e, n], k) => filas.push([`Punto de control ${k + 1}`,
+      `pixel (${x.toFixed(0)}, ${y.toFixed(0)})  ->  E ${e.toFixed(2)}  N ${n.toFixed(2)}`]));
+    return filas;
+  }
+
+  /** Misma georreferencia (mismos puntos y origen)? */
+  igualA(otra) {
+    return !!otra && JSON.stringify(this.puntos) === JSON.stringify(otra.puntos) &&
+      this.esPlano() === otra.esPlano();
+  }
+}
+
+/** Georreferencia de ejemplo (georreferencia.ejemplo): esquina inferior izquierda en E 350 000, N 8 460 000. */
+export function ejemplo(ancho, alto, anchoM = 400, este = 350000, norte = 8460000) {
+  const k = anchoM / ancho;
+  return new Georreferencia([[0, alto, este, norte], [ancho, alto, este + anchoM, norte],
+                             [0, 0, este, norte + alto * k], [ancho, 0, este + anchoM, norte + alto * k]], { modo: "puntos" });
 }
 
 export function pasoGrilla(anchoM, lineas = 8) {

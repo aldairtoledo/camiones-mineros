@@ -220,7 +220,7 @@ function iniciarVideo(demo) {
 // ---------------------------------------------------------------- recalculo (zonas y limites)
 const zonasDelAnalisis = () => E.demo.zonas.map((z) => ({ puntos: z.puntos.map((p) => [...p]), tipo: z.tipo,
   nombre: z.nombre || "", limite: z.limite, rol: ROLES[z.rol] ? z.rol : "" }));
-const firma = () => JSON.stringify({ z: E.zonas, l: E.limiteGeneral || null, c: E.georef ? E.georef.escalaMPx : null });
+const firma = () => JSON.stringify({ z: E.zonas, l: E.limiteGeneral || null, c: E.georef ? E.georef.puntos : null });
 
 function recalcularTodo() {
   const d = E.demo;
@@ -1161,10 +1161,13 @@ $("f-zonas").addEventListener("change", async (e) => {
     if (datos.georreferencia) {
       let geo = null;
       try { geo = Georreferencia.desdeDict(datos.georreferencia); } catch { geo = null; }
-      if (geo && geo.esPlano() && E.escalaBase.editable) {
-        if (Math.abs(geo.escalaMPx / E.georef.escalaMPx - 1) > 1e-9) cambiarCalibracion(geo, false);
-      } else {
-        toast("El archivo trae una calibración con puntos UTM: aquí se mantiene la del análisis.");
+      if (geo && E.escalaBase.editable) {
+        if (!geo.igualA(E.georef)) {
+          if (!geo.igualA(E.escalaBase.georef)) geo.info.editada_web = true;
+          cambiarCalibracion(geo, geo.igualA(E.escalaBase.georef));
+        }
+      } else if (geo) {
+        toast("Este video se analizó sin calibración: aquí no se puede usar la calibración del archivo.");
       }
     }
   } catch {
@@ -1180,15 +1183,17 @@ function actualizarCalibracion() {
   const medida = `${miles(W * geo.escalaMPx)}\u00a0×\u00a0${miles(H * geo.escalaMPx)}\u00a0m`;
   const fuente = String(geo.info.fuente || "");
   const pct = geo.info.incertidumbre_escala_pct;
+  const [e0, n0] = geo.esPlano() ? geo.origenPlano() : [0, 0];
+  const org = e0 || n0 ? ` · origen E\u00a0${miles(e0)}, N\u00a0${miles(n0)}` : "";
   if (geo.info.revisar) {
     el.textContent = `⚠ Revisa la calibración: ${geo.info.revisar}. Las velocidades pueden salir mal.`;
     el.style.color = C.acento;
   } else if (geo.esPlano() && (fuente.startsWith("Solo camión") || fuente.startsWith("Automática"))) {
     const origen = fuente.startsWith("Automática") ? `automática, camión de ${g(geo.info.largo_m || 15)} m` : "con el tamaño del camión";
-    el.textContent = `≈ Aproximada (${origen}, ±\u00a0${g(pct || 7)}\u00a0%): ${medida}. Para más precisión, calibra con una distancia conocida.`;
+    el.textContent = `≈ Aproximada (${origen}, ±\u00a0${g(pct || 7)}\u00a0%): ${medida}${org}. Para más precisión, calibra con una distancia conocida.`;
     el.style.color = C.acento;
   } else if (geo.esPlano()) {
-    el.textContent = `✓ Plano en metros: ${medida}${pct ? ` · ±\u00a0${pct.toFixed(1)}\u00a0%` : ""}`;
+    el.textContent = `✓ Plano en metros: ${medida}${pct ? ` · ±\u00a0${pct.toFixed(1)}\u00a0%` : ""}${org}`;
     el.style.color = C.ok;
   } else {
     el.textContent = `✓ Coordenadas UTM: ${geo.puntos.length} puntos${geo.errorMedible() ? ` · error ${geo.errorM.toFixed(2)} m` : ""}.`;
@@ -1218,7 +1223,7 @@ $("b-calibracion").addEventListener("click", () => {
     if (E.regla) activarRegla(false);
     video.pause();
     abrirEditor({ demo: E.demo, base: E.escalaBase, georef: E.georef, video,
-                  cambiada: Math.abs(E.georef.escalaMPx / E.escalaBase.georef.escalaMPx - 1) > 1e-9,
+                  cambiada: !E.georef.igualA(E.escalaBase.georef),
                   alAplicar: cambiarCalibracion, confirmar });
     return;
   }

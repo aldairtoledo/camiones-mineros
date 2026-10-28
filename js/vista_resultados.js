@@ -94,6 +94,7 @@ function pintar() {
   ESTADO.R = R;
   const geo = E.georef;
   const calib = !geo ? "sin calibrar (medidas en píxeles)"
+    : !geo.esPlano() ? "con puntos UTM (Este, Norte)"
     : String(geo.info.fuente || "").startsWith("Solo camión") || String(geo.info.fuente || "").startsWith("Automática")
       ? `aproximada con el tamaño del camión (± ${geo.info.incertidumbre_escala_pct ?? 7} %)` : "en metros";
   $("res-sub").textContent = `${E.demo.video} · ${R.completo ? `todo el video (${hms(dur)})` : `primeros ${hms(R.T)} de ${hms(dur)}`} · calibración ${calib}`;

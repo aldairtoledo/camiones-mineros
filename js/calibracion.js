@@ -6,13 +6,14 @@
 // local todo lo medido (velocidades, distancias, posiciones en metros) es proporcional a la escala,
 // asi que se multiplica por k = escala nueva / escala del analisis. Lo demas (zonas, conteos,
 // limites y avisos de exceso) se recalcula en el navegador como siempre.
-import { Georreferencia } from "./georef.js";
+import { Georreferencia, ejemplo as georefEjemplo } from "./georef.js";
 
 const ERROR_METODO_CAMION = 0.07;          // app.py: incertidumbre del metodo del camion
 const UMBRAL_DESACUERDO = 0.15;            // camion vs distancias
 const LARGO_RAZONABLE = [6.0, 20.0];       // control de sentido comun (m)
 const DESVIO_TOLERADO = 0.25;
 const COLOR_DIST = "#B388FF";
+const COLOR_PUNTO = "#29B6F6";
 const OPCIONES = ["Solo camión", "Solo distancias", "Combinar ambos"];
 const AYUDA = {
   "Solo camión": "La escala sale del tamaño de los camiones. Es rápida pero aproximada (± 5–10 %): sirve para empezar " +
@@ -29,6 +30,11 @@ const f1 = (v) => v.toFixed(1);
 const miles = (v) => Math.round(v).toString().replace(/\B(?=(\d{3})+(?!\d))/g, " ");
 const pct = (v) => `± ${v.toFixed(1)} %`;
 const g = (v) => (Number.isInteger(v) ? String(v) : String(Math.round(v * 100) / 100));
+const f2 = (v) => v.toFixed(2);
+const milesD = (v, d) => {                                // 8460000.5 -> "8 460 000.50"
+  const [a, b] = Math.abs(v).toFixed(d).split(".");
+  return (v < 0 ? "-" : "") + a.replace(/\B(?=(\d{3})+(?!\d))/g, " ") + (b ? `.${b}` : "");
+};
 const esc = (t) => String(t ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 function numero(texto) {
   let t = String(texto ?? "").trim().replace(/[\s ]/g, "");
@@ -57,8 +63,9 @@ export function prepararEscala(demo) {
       if (f[6] === "D" && f[5] != null && f[5] >= 1.5) tipica.push(f[5]);
     }
   }
+  // Se puede editar si el video se analizo calibrado (plano local o puntos UTM).
   return { georef, dict: demo.calibracion, kmh, velTipica: tipica.length >= 10 ? mediana(tipica) : null,
-           editable: !!georef && georef.esPlano() };
+           editable: !!georef };
 }
 
 export const factorEscala = (base, geo) => (base.georef && geo ? geo.escalaMPx / base.georef.escalaMPx : 1);
@@ -74,27 +81,61 @@ export function escalarDemo(base, demo, geo) {
   demo.calibracion = geo ? geo.aDict() : base.dict;
 }
 
-/** Posiciones y metros del tablero (resultados.json) con la nueva escala. */
+const CAMPOS_POS = ["x_m", "y_m", "este_m", "norte_m", "velocidad_km_h"];
+
+/**
+ * Posiciones y metros del tablero (resultados.json) con la nueva calibracion. Las posiciones se
+ * calculan otra vez desde el pixel de cada camion, igual que en deteccion_camiones.py
+ * (_trayectorias_georef): plano local -> X, Y (y Este, Norte si el origen no es 0; 0);
+ * puntos UTM -> Este, Norte. La velocidad sale del avance entre una muestra y la siguiente.
+ */
 export function escalarTablero(base, tablero, geo) {
   if (!tablero) return;
-  const k = factorEscala(base, geo);
+  const tray = tablero.trayectorias || [];
   if (!tablero._original) {
     tablero._original = {
       acum: (tablero.acumulados || []).map((f) => f[6]),
-      tray: (tablero.trayectorias || []).map((f) => [f.x_m, f.y_m, f.velocidad_km_h]),
+      tray: tray.map((f) => CAMPOS_POS.map((k) => (k in f ? f[k] : undefined))),
+      ejes: tablero.ejes ? { ...tablero.ejes, etiquetas: [...(tablero.ejes.etiquetas || [])] } : null,
       calibracion: tablero.calibracion,
     };
   }
   const o = tablero._original;
+  if (!geo || geo.igualA(base.georef)) {                      // la del analisis: valores originales
+    (tablero.acumulados || []).forEach((f, i) => { f[6] = o.acum[i]; });
+    tray.forEach((f, i) => CAMPOS_POS.forEach((k, j) => {
+      if (o.tray[i][j] === undefined) delete f[k]; else f[k] = o.tray[i][j];
+    }));
+    if (o.ejes) tablero.ejes = { ...o.ejes, etiquetas: [...o.ejes.etiquetas] };
+    tablero.calibracion = o.calibracion;
+    return;
+  }
+  const k = factorEscala(base, geo);
   (tablero.acumulados || []).forEach((f, i) => { if (o.acum[i] != null) f[6] = Math.round(o.acum[i] * k * 1e4) / 1e4; });
-  const [e0, n0] = geo ? geo.origenPlano() : [0, 0];
-  (tablero.trayectorias || []).forEach((f, i) => {
-    const [x, y, v] = o.tray[i];
-    if (x != null) { f.x_m = Math.round(x * k * 100) / 100; if ("este_m" in f) f.este_m = Math.round((e0 + f.x_m) * 100) / 100; }
-    if (y != null) { f.y_m = Math.round(y * k * 100) / 100; if ("norte_m" in f) f.norte_m = Math.round((n0 + f.y_m) * 100) / 100; }
-    if (v != null) f.velocidad_km_h = Math.round(v * k * 10) / 10;
-  });
-  tablero.calibracion = geo ? geo.aDict() : o.calibracion;
+  const plano = geo.esPlano(), [e0, n0] = plano ? geo.origenPlano() : [0, 0];
+  const r2 = (v) => Math.round(v * 100) / 100;
+  const ultimo = new Map();
+  for (const f of tray) {
+    for (const c of CAMPOS_POS) delete f[c];
+    const [e, n] = geo.aCoordenadas(f.centro_x, f.centro_y);
+    if (plano) {
+      f.x_m = r2(e - e0); f.y_m = r2(n - n0);
+      if (e0 || n0) { f.este_m = r2(e); f.norte_m = r2(n); }
+    } else {
+      f.este_m = r2(e); f.norte_m = r2(n);
+    }
+    const previo = ultimo.get(f.id_camion);
+    let vel = 0;
+    if (previo && f.movimiento === "EN_MOVIMIENTO") {
+      const dt = f.tiempo_s - previo[0];
+      if (dt > 0) vel = Math.hypot(e - previo[1], n - previo[2]) / dt * 3.6;
+    }
+    f.velocidad_km_h = Math.round(vel * 10) / 10;
+    ultimo.set(f.id_camion, [f.tiempo_s, e, n]);
+  }
+  tablero.ejes = plano ? { x: "x_m", y: "y_m", etiquetas: ["X (m)", "Y (m)"] }
+                       : { x: "este_m", y: "norte_m", etiquetas: ["Este (m)", "Norte (m)"] };
+  tablero.calibracion = geo.aDict();
 }
 
 // ---------------------------------------------------------------- medida de los camiones
@@ -194,6 +235,43 @@ export function calcularPlano({ eleccion, largoM, anchoM, distancias, medida, re
   return r;
 }
 
+// ---------------------------------------------------------------- puntos UTM (app.py _calcular_puntos)
+export function calcularPuntos(puntos) {
+  const completos = puntos.map((p, i) => ({ p, i, e: numero(p.e), n: numero(p.n) })).filter((v) => v.e != null && v.n != null);
+  const incompletos = puntos.length - completos.length;
+  const r = { geo: null, lineas: [], residuos: new Map(), validas: [], conflicto: null, utm: true };
+  if (completos.length < 2) {
+    r.falta = "Toca la imagen para agregar puntos (o usa el ejemplo). Se necesitan al menos 2 con Este y Norte.";
+    return r;
+  }
+  let geo;
+  try {
+    geo = new Georreferencia(completos.map((v) => [v.p.x, v.p.y, v.e, v.n]), { modo: "puntos", editada_web: true });
+    if (!(geo.escalaMPx > 0) || !Number.isFinite(geo.escalaMPx) || !geo.inv.flat().every(Number.isFinite)) {
+      throw new Error("los puntos tienen las mismas coordenadas.");
+    }
+  } catch (e) {
+    r.falta = `No se puede calcular: ${String(e.message || e).replace(/^./, (c) => c.toLowerCase())}`;
+    r.error = true;
+    return r;
+  }
+  r.geo = geo;
+  r.escala = geo.escalaMPx;
+  let calidad;
+  if (geo.errorMedible()) {
+    completos.forEach((v, k) => {
+      const res = geo.residuos[k];
+      r.residuos.set(v.i, { texto: `${f2(res)} m`, ok: res <= Math.max(1.0, 3 * geo.escalaMPx) });
+    });
+    calidad = `Error medio: ${f2(geo.errorM)} m`;
+  } else {
+    calidad = "Error: agrega un 4.º punto para poder medirlo.";
+  }
+  r.lineas = [`✓  ${geo.metodo}`, calidad, `Escala: 1 m = ${f1(1 / geo.escalaMPx)} píxeles del video`];
+  if (incompletos) r.lineas.push(`(${incompletos} punto(s) sin coordenadas no se usan)`);
+  return r;
+}
+
 function sugerir(fuentes, validas, incert, anchoM, medida, anchoVideo) {
   const pesos = fuentes.reduce((s, f) => s + 1 / (f.u * f.u), 0);
   const conOtra = (px) => { const u = hipot(1.5 * Math.SQRT2 / px, 0.01); return 1 / Math.sqrt(pesos + 1 / (u * u)) * 100; };
@@ -214,7 +292,7 @@ function sugerir(fuentes, validas, incert, anchoM, medida, anchoVideo) {
 }
 
 /** Vista previa del impacto y control de sentido comun (app.py _revisar_impacto). */
-function impacto(r, { eleccion, largoM, medida, base }) {
+function impacto(r, { eleccion, largoM, medida, base, utm = false }) {
   if (!r.geo) return null;
   const e = r.escala, [min, max] = LARGO_RAZONABLE;
   const esperado = largoM && largoM >= min && largoM <= max ? largoM : 15.0;
@@ -236,7 +314,7 @@ function impacto(r, { eleccion, largoM, medida, base }) {
   } else if (Math.abs(desvio) > DESVIO_TOLERADO) {
     const peor = r.validas.length && largoM ? r.validas.reduce((m, v) => (Math.abs(v.m / v.px / (largoM / medida.largo_px) - 1) >
       Math.abs(m.m / m.px / (largoM / medida.largo_px) - 1) ? v : m)) : null;
-    const revisa = peor ? `Revisa los metros de D${peor.i + 1}.` : "Revisa tus distancias.";
+    const revisa = utm ? "Revisa las coordenadas de los puntos." : peor ? `Revisa los metros de D${peor.i + 1}.` : "Revisa tus distancias.";
     return { texto: `⚠  Con esta escala los camiones medirían ${Math.round(largo)} m (lo esperado es ≈ ${g(esperado)} m). ${revisa}` +
                     (vel ? `\nLas velocidades también cambian: ${vel}.` : ""),
              nivel: "alerta", alerta: { largo, esperado, factor: largo / esperado } };
@@ -253,8 +331,11 @@ export function abrirEditor(ctx) {
   const dlg = $("dlg-calib-editor"), lienzo = $("ce-lienzo"), c = lienzo.getContext("2d");
   const [W, H] = demo.resolucion;
   const medidos = camionesMedidos(demo, base);
-  const info = ctx.georef?.info || {};
+  const utmInicial = !!ctx.georef && !ctx.georef.esPlano();
+  const info = utmInicial ? {} : ctx.georef?.info || {};
   const S = {
+    modo: utmInicial ? "utm" : "plano",
+    puntos: utmInicial ? ctx.georef.puntos.map(([x, y, e, n]) => ({ x, y, e: f2(e), n: f2(n) })) : [],
     eleccion: /^Solo distancias/.test(info.fuente || "") ? "Solo distancias" : /^Solo camión/.test(info.fuente || "") ? "Solo camión" : "Combinar ambos",
     distancias: (info.distancias || []).map(([x1, y1, x2, y2, m]) => ({ p: [x1, y1, x2, y2], m: g(m) })),
     midiendo: false, primer: null, cursor: null,
@@ -262,7 +343,9 @@ export function abrirEditor(ctx) {
   };
   $("ce-largo").value = info.largo_m ? g(info.largo_m) : "15";
   $("ce-ancho").value = info.ancho_m ? g(info.ancho_m) : "";
-  const origen = ctx.georef ? ctx.georef.origenPlano() : [0, 0];
+  const [oe, on] = !utmInicial && ctx.georef ? ctx.georef.origenPlano() : [0, 0];
+  $("ce-oe").value = g(oe);
+  $("ce-on").value = g(on);
   let R = null, imp = null;
 
   // muestra de camiones mas cercana al momento del video
@@ -283,14 +366,18 @@ export function abrirEditor(ctx) {
   const aVideo = (x, y, G) => [(x - G.ox) / G.e, (y - G.oy) / G.e];
   const dentro = ([x, y]) => x >= 0 && y >= 0 && x <= W && y <= H;
 
-  function etiqueta(texto, x, y, fondo, color, ocupadas) {
-    c.font = "600 11px IBM Plex Sans, Segoe UI, sans-serif";
-    const w = c.measureText(texto).width + 10, h = 16;
-    let yy = y;
-    for (let k = 0; k < 8 && ocupadas.some((o) => x - w / 2 < o[2] && x + w / 2 > o[0] && yy - h / 2 < o[3] && yy + h / 2 > o[1]); k++) yy -= h + 3;
-    ocupadas.push([x - w / 2, yy - h / 2, x + w / 2, yy + h / 2]);
-    c.fillStyle = fondo; c.fillRect(x - w / 2, yy - h / 2, w, h);
-    c.fillStyle = color; c.textAlign = "center"; c.textBaseline = "middle"; c.fillText(texto, x, yy + 0.5);
+  // Etiqueta justo encima de su camion (si choca con otra etiqueta, sube un poco).
+  function etiqueta(texto, x, y, fondo, color, ocupadas, caja = null) {
+    c.font = "600 10.5px IBM Plex Sans, Segoe UI, sans-serif";
+    const w = c.measureText(texto).width + 8, h = 15;
+    const Wc = lienzo.clientWidth, Hc = lienzo.clientHeight;
+    const px = Math.min(Math.max(caja ? (caja[0] + caja[2]) / 2 : x, w / 2 + 2), Wc - w / 2 - 2);
+    let py = Math.min(Math.max(caja ? caja[1] - h / 2 - 2 : y, h / 2 + 2), Hc - h / 2 - 2);
+    const choca = (b) => ocupadas.some((o) => px - w / 2 < o[2] && px + w / 2 > o[0] && b - h / 2 < o[3] && b + h / 2 > o[1]);
+    for (let k = 0; k < 3 && choca(py); k++) py -= h + 2;
+    ocupadas.push([px - w / 2, py - h / 2, px + w / 2, py + h / 2]);
+    c.fillStyle = fondo; c.fillRect(px - w / 2, py - h / 2, w, h);
+    c.fillStyle = color; c.textAlign = "center"; c.textBaseline = "middle"; c.fillText(texto, px, py + 0.5);
   }
 
   function pintar() {
@@ -308,6 +395,21 @@ export function abrirEditor(ctx) {
     } catch { /* sin imagen */ }
     const escala = R?.geo ? R.escala : null;
     const ocupadas = [];
+    if (S.modo === "utm") {
+      // puntos de control (cruz celeste con su nombre)
+      S.puntos.forEach((q, i) => {
+        const [x, y] = aLienzo(q.x, q.y, G);
+        c.lineCap = "round";
+        c.strokeStyle = "#FFFFFF"; c.lineWidth = 3;
+        c.beginPath(); c.moveTo(x - 11, y); c.lineTo(x + 11, y); c.moveTo(x, y - 11); c.lineTo(x, y + 11); c.stroke();
+        c.strokeStyle = COLOR_PUNTO; c.lineWidth = 1.5;
+        c.beginPath(); c.moveTo(x - 10, y); c.lineTo(x + 10, y); c.moveTo(x, y - 10); c.lineTo(x, y + 10); c.stroke();
+        c.lineWidth = 2; c.beginPath(); c.arc(x, y, 6, 0, 7); c.stroke();
+        etiqueta(`P${i + 1}`, x + 22, y - 14, COLOR_PUNTO, "#0B1A26", ocupadas);
+      });
+      $("ce-zoom").textContent = S.vista.zoom > 1.001 ? `${Math.round(S.vista.zoom * 100)} %` : "100 %";
+      return;
+    }
     // ejes del plano
     const [x0, y0] = aLienzo(0, H, G);
     c.strokeStyle = "#F2A900"; c.lineWidth = 3;
@@ -321,10 +423,13 @@ export function abrirEditor(ctx) {
         c.strokeStyle = cam.usado ? "#4CD964" : "#6B7280"; c.lineWidth = cam.usado ? 2 : 1;
         c.beginPath(); p.forEach(([x, y], i) => (i ? c.lineTo(x, y) : c.moveTo(x, y))); c.closePath(); c.stroke();
         c.setLineDash([]);
-        if (escala) {
-          const cx = p.reduce((s, q) => s + q[0], 0) / 4, cy = Math.min(...p.map((q) => q[1])) - 10;
-          etiqueta(`${cam.usado ? "" : "✕ "}${f1(cam.largo * escala)} m`, cx, cy, "#12151A", cam.usado ? "#E8EAED" : "#9AA3AE", ocupadas);
-        }
+      }
+      for (const cam of muestra.camiones) {
+        if (!escala) break;
+        const p = cam.poli.map(([x, y]) => aLienzo(x, y, G));
+        const xs = p.map((q) => q[0]), ys = p.map((q) => q[1]);
+        etiqueta(`${cam.usado ? "" : "✕ "}${f1(cam.largo * escala)} m`, 0, 0, "#12151A", cam.usado ? "#E8EAED" : "#9AA3AE", ocupadas,
+                 [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)]);
       }
     }
     // distancias
@@ -350,9 +455,59 @@ export function abrirEditor(ctx) {
   // ---- calculo y panel
   function medidaActual() { return resumir(medidos.muestras, medidos.respaldo); }
 
+  function pintarModo() {
+    document.querySelectorAll("#ce-modo button").forEach((b) => {
+      b.classList.toggle("activo", b.dataset.m === S.modo);
+      b.setAttribute("aria-checked", String(b.dataset.m === S.modo));
+    });
+    $("ce-panel-plano").hidden = S.modo !== "plano";
+    $("ce-panel-utm").hidden = S.modo !== "utm";
+  }
+
+  function recalcularUtm() {
+    const largoM = numero($("ce-largo").value), medida = medidaActual();
+    R = calcularPuntos(S.puntos);
+    imp = impacto(R, { eleccion: "utm", largoM, medida, base, utm: true });
+    const lista = $("ce-puntos");
+    lista.innerHTML = "";
+    S.puntos.forEach((q, i) => {
+      const fila = document.createElement("div");
+      fila.className = "ce-punto";
+      const res = R.residuos.get(i);
+      fila.innerHTML = `<span class="ce-p">P${i + 1}</span>` +
+        `<input type="text" inputmode="decimal" placeholder="Este" aria-label="Este de P${i + 1} (m)">` +
+        `<input type="text" inputmode="decimal" placeholder="Norte" aria-label="Norte de P${i + 1} (m)">` +
+        `<span class="ce-res ${res ? (res.ok ? "ce-ok" : "ce-aviso") : ""}">${res ? esc(res.texto) : ""}</span>` +
+        `<button class="ce-quitar" aria-label="Quitar P${i + 1}">✕</button>`;
+      const [ie, inn] = fila.querySelectorAll("input");
+      ie.value = q.e ?? ""; inn.value = q.n ?? "";
+      ie.addEventListener("input", () => { q.e = ie.value; programar(); });
+      inn.addEventListener("input", () => { q.n = inn.value; programar(); });
+      ie.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); inn.focus(); } });
+      fila.querySelector("button").addEventListener("click", () => { S.puntos.splice(i, 1); recalcular(); });
+      lista.appendChild(fila);
+    });
+    $("ce-sin-puntos").hidden = S.puntos.length > 0;
+    $("ce-borrar-puntos").disabled = !S.puntos.length;
+    const res = $("ce-resumen");
+    res.textContent = R.geo ? R.lineas.join("\n") : R.falta;
+    res.classList.toggle("suave", !R.geo && !R.error);
+    res.classList.toggle("ce-error", !!R.error);
+    const caja = $("ce-impacto");
+    caja.hidden = !imp;
+    if (imp) { caja.textContent = imp.texto; caja.className = `ce-caja ce-${imp.nivel}`; }
+    $("ce-ajuste").hidden = true;
+    $("ce-consejo").hidden = true;
+    $("ce-aplicar").disabled = !R.geo;
+    pintar();
+  }
+
   function recalcular() {
+    pintarModo();
+    if (S.modo === "utm") { recalcularUtm(); return; }
     const largoM = numero($("ce-largo").value), anchoM = numero($("ce-ancho").value);
     const medida = medidaActual();
+    const origen = [numero($("ce-oe").value) || 0, numero($("ce-on").value) || 0];
     R = calcularPlano({ eleccion: S.eleccion, largoM, anchoM, distancias: S.distancias, medida, resolucion: [W, H], origen });
     imp = impacto(R, { eleccion: S.eleccion, largoM, medida, base });
     // secciones visibles
@@ -361,6 +516,7 @@ export function abrirEditor(ctx) {
     $("ce-sec-dist").hidden = !secciones.includes("dist");
     $("ce-t-camion").textContent = `1.  Tamaño real del camión`;
     $("ce-t-dist").textContent = `${secciones.indexOf("dist") + 1}.  Distancias conocidas`;
+    $("ce-t-origen").textContent = `${secciones.length + 1}.  Origen (0; 0) en la esquina inferior izquierda`;
     $("ce-ayuda").textContent = AYUDA[S.eleccion];
     document.querySelectorAll("#ce-eleccion button").forEach((b) => {
       b.classList.toggle("activo", b.dataset.v === S.eleccion);
@@ -397,6 +553,7 @@ export function abrirEditor(ctx) {
     const res = $("ce-resumen");
     res.textContent = R.geo ? R.lineas.join("\n") : R.falta;
     res.classList.toggle("suave", !R.geo);
+    res.classList.remove("ce-error");
     const caja = $("ce-impacto");
     caja.hidden = !imp;
     if (imp) { caja.textContent = imp.texto; caja.className = `ce-caja ce-${imp.nivel}`; }
@@ -407,10 +564,11 @@ export function abrirEditor(ctx) {
   }
   let tProg = null;
   const programar = () => { clearTimeout(tProg); tProg = setTimeout(() => {
-    const foco = document.activeElement, idx = [...$("ce-lista").querySelectorAll("input")].indexOf(foco);
+    const entradas = () => [...dlg.querySelectorAll(".ce-lista input")];
+    const foco = document.activeElement, idx = entradas().indexOf(foco);
     const pos = foco?.selectionStart;
     recalcular();
-    if (idx >= 0) { const e = $("ce-lista").querySelectorAll("input")[idx]; e?.focus(); try { e?.setSelectionRange(pos, pos); } catch { /* sin cursor */ } }
+    if (idx >= 0) { const e = entradas()[idx]; e?.focus(); try { e?.setSelectionRange(pos, pos); } catch { /* sin cursor */ } }
   }, 250); };
 
   function pintarAjuste() {
@@ -481,6 +639,14 @@ export function abrirEditor(ctx) {
   function tocar(p) {
     const G = geom(), v = aVideo(...p, G);
     if (!dentro(v)) return;
+    if (S.modo === "utm") {
+      S.puntos.push({ x: Math.round(v[0] * 10) / 10, y: Math.round(v[1] * 10) / 10, e: "", n: "" });
+      recalcular();
+      const filas = $("ce-puntos").querySelectorAll(".ce-punto");
+      filas[filas.length - 1]?.querySelector("input")?.focus();
+      $("ce-pie").textContent = `Escribe el Este y el Norte de P${S.puntos.length} (en metros).`;
+      return;
+    }
     if (S.midiendo) {
       if (!S.primer) {
         S.primer = v;
@@ -529,7 +695,10 @@ export function abrirEditor(ctx) {
     S.cursor = dentro(v) ? v : null;
     if (!S.cursor) return;
     let txt = `Píxel (${Math.round(v[0])}, ${Math.round(v[1])})`;
-    if (R?.geo) {
+    if (R?.geo && !R.geo.esPlano()) {
+      const [e, n] = R.geo.aCoordenadas(...v);
+      txt += `  →  E ${milesD(e, 2)}   N ${milesD(n, 2)}`;
+    } else if (R?.geo) {
       const [x, y] = R.geo.aPlano(...v);
       txt += `  →  X ${f1(x)} m   Y ${f1(y)} m`;
       if (S.primer) txt += `   (distancia ${f1(hipot(v[0] - S.primer[0], v[1] - S.primer[1]) * R.escala)} m)`;
@@ -589,7 +758,23 @@ export function abrirEditor(ctx) {
     if (S.eleccion === "Solo camión") terminarMedicion();
     recalcular();
   }));
-  $("ce-largo").oninput = $("ce-ancho").oninput = programar;
+  $("ce-largo").oninput = $("ce-ancho").oninput = $("ce-oe").oninput = $("ce-on").oninput = programar;
+  document.querySelectorAll("#ce-modo button").forEach((b) => (b.onclick = () => {
+    if (S.modo === b.dataset.m) return;
+    S.modo = b.dataset.m;
+    terminarMedicion();
+    piePorModo();
+    recalcular();
+  }));
+  $("ce-ejemplo").onclick = () => {
+    S.puntos = georefEjemplo(W, H).puntos.map(([x, y, e, n]) => ({ x, y, e: f2(e), n: f2(n) }));
+    recalcular();
+  };
+  $("ce-borrar-puntos").onclick = () => { S.puntos = []; recalcular(); };
+  function piePorModo() {
+    $("ce-pie").textContent = S.modo === "utm" ? "Toca la imagen para agregar un punto de control."
+      : "El (0; 0) es la esquina inferior izquierda. X hacia la derecha, Y hacia arriba.";
+  }
   $("ce-agregar").onclick = () => (S.midiendo ? (terminarMedicion(), pintar()) : empezarDistancia());
   $("ce-mas").onclick = () => acercar(1.5);
   $("ce-menos").onclick = () => acercar(1 / 1.5);
@@ -621,7 +806,7 @@ export function abrirEditor(ctx) {
   window.addEventListener("resize", alCambiarTamano);
   dlg.oncancel = () => window.removeEventListener("resize", alCambiarTamano);
   terminarMedicion();
-  $("ce-pie").textContent = "El (0; 0) es la esquina inferior izquierda. X hacia la derecha, Y hacia arriba.";
+  piePorModo();
   dlg.showModal();
   recalcular();
   requestAnimationFrame(pintar);
