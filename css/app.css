@@ -448,3 +448,25 @@ select { height: 34px; padding: 0 8px; border: 1px solid var(--borde); border-ra
   border-top: 1px solid var(--borde); }
 .ce-panel > * { flex-shrink: 0; }
 .ce-caja b { display: block; }
+
+/* Calibracion: plano local / puntos UTM */
+.ce-modo { margin-top: 4px; }
+.ce-modo button { font-weight: 600; }
+.ce-modo button.activo { background: var(--acento); color: var(--texto-acento); }
+.ce-modo-panel { display: flex; flex-direction: column; gap: 8px; }
+.ce-modo-panel[hidden] { display: none; }
+.ce-modo-panel > * { flex-shrink: 0; }
+.calib-editor .ce-origen input { width: 116px; }
+.ce-intro-utm { margin: 2px 0 0; color: var(--texto); }
+.ce-cab-puntos { display: grid; grid-template-columns: 34px minmax(0,1fr) minmax(0,1fr) 46px 24px; gap: 5px; padding: 0 6px; font-size: 11px; font-weight: 600; color: var(--suave); }
+.ce-cab-puntos span:nth-child(4) { grid-column: 4 / span 2; }
+.calib-editor .ce-punto { display: grid; grid-template-columns: 34px minmax(0,1fr) minmax(0,1fr) 46px 24px; gap: 5px; align-items: center; padding: 5px 6px;
+  border-radius: 8px; background: var(--tarjeta); font-size: 12px; }
+.calib-editor .ce-punto input { width: 100%; min-width: 0; height: 32px; padding: 0 6px; margin: 0; border: 1px solid var(--borde);
+  border-radius: 8px; background: var(--fondo); color: var(--texto); font: inherit; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.calib-editor .ce-punto input:focus { outline: 2px solid #29B6F6; outline-offset: -1px; }
+.ce-p { padding: 3px 0; border-radius: 6px; background: #29B6F6; color: #0B1A26; font-weight: 700; font-size: 12px; text-align: center; }
+.ce-res { font-size: 11px; white-space: nowrap; color: var(--suave); font-variant-numeric: tabular-nums; }
+.ce-res.ce-ok { color: #4CD964; } .ce-res.ce-aviso { color: var(--acento); }
+.ce-fila-botones { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.ce-resumen.ce-error { color: #FF6B6B; }
