@@ -322,6 +322,11 @@
     <h3 id="ce-titulo">Calibrar coordenadas</h3>
     <p class="suave ce-intro">Convierte el video en un plano en metros: posición, distancia y velocidad de cada camión, como un GPS.
       No hace falta volver a analizar el video.</p>
+    <div class="segmentado ce-modo" id="ce-modo" role="radiogroup" aria-label="Tipo de coordenadas">
+      <button role="radio" data-m="plano">Plano local (recomendado)</button>
+      <button role="radio" data-m="utm">Avanzado: puntos UTM</button>
+    </div>
+    <div class="ce-modo-panel" id="ce-panel-plano">
     <p class="ce-et">¿Cómo quieres calcular la escala?</p>
     <div class="segmentado ce-eleccion" id="ce-eleccion" role="radiogroup" aria-label="Forma de calcular la escala">
       <button role="radio" data-v="Solo camión">Solo camión</button>
@@ -343,6 +348,25 @@
       <button class="boton ce-agregar" id="ce-agregar">+  Agregar distancia</button>
       <div id="ce-lista" class="ce-lista"></div>
     </section>
+    <section id="ce-sec-origen">
+      <p class="ce-et" id="ce-t-origen">3.  Origen (0; 0) en la esquina inferior izquierda</p>
+      <p class="suave ce-nota">Déjalo en 0 y 0 para un plano local, o escribe coordenadas UTM (ej. E 350000, N 8460000) para ubicarlo en el mapa.</p>
+      <div class="ce-medidas ce-origen">
+        <label>E <input type="text" id="ce-oe" inputmode="decimal" value="0" aria-label="Este del origen (m)"></label>
+        <label>N <input type="text" id="ce-on" inputmode="decimal" value="0" aria-label="Norte del origen (m)"></label>
+      </div>
+    </section>
+    </div>
+    <div class="ce-modo-panel" id="ce-panel-utm" hidden>
+      <p class="ce-caja ce-intro-utm">Toca lugares del video que puedas ubicar (una esquina, un poste, un cruce) y escribe su Este y Norte. Con 2 puntos ya funciona; con 4 o más se calcula el error.</p>
+      <div class="ce-cab-puntos" aria-hidden="true"><span>Punto</span><span>Este (m)</span><span>Norte (m)</span><span>Error</span></div>
+      <div id="ce-puntos" class="ce-lista"></div>
+      <p class="suave ce-nota" id="ce-sin-puntos">Aún no hay puntos: toca la imagen para agregar el primero.</p>
+      <div class="ce-fila-botones">
+        <button class="boton" id="ce-ejemplo">Usar ejemplo</button>
+        <button class="boton" id="ce-borrar-puntos">Borrar puntos</button>
+      </div>
+    </div>
     <div class="ce-caja ce-aviso" id="ce-ajuste" hidden></div>
     <div class="ce-caja ce-consejo" id="ce-consejo" hidden></div>
     <div class="ce-caja ce-ok" id="ce-impacto" hidden></div>
