@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Prueba en vivo</title>
+<style>
+  :root { --fondo:#12151A; --panel:#1A1E25; --tarjeta:#222731; --borde:#2E3440; --texto:#E8EAED; --suave:#9AA3AE; --acento:#F2A900; --ok:#4CD964; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--fondo); color: var(--texto); font: 15px/1.5 "Segoe UI", system-ui, sans-serif; }
+  main { max-width: 1100px; margin: 0 auto; padding: 20px 16px 40px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  p { margin: 0 0 12px; color: var(--suave); }
+  .botones { display: flex; flex-wrap: wrap; gap: 10px; margin: 16px 0; }
+  button { height: 42px; padding: 0 16px; border-radius: 9px; border: 1px solid var(--borde); background: var(--tarjeta); color: var(--texto); font: inherit; font-weight: 600; cursor: pointer; }
+  button.primario { background: var(--acento); border-color: var(--acento); color: #14171C; }
+  button:disabled { opacity: .5; cursor: default; }
+  .marco { position: relative; background: var(--panel); border: 1px solid var(--borde); border-radius: 14px; padding: 8px; }
+  canvas { display: block; width: 100%; height: auto; border-radius: 8px; background: #000; }
+  .datos { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; margin-top: 14px; }
+  .dato { background: var(--panel); border: 1px solid var(--borde); border-radius: 12px; padding: 12px 14px; }
+  .dato b { display: block; font-size: 24px; font-variant-numeric: tabular-nums; }
+  .dato span { color: var(--suave); font-size: 13px; }
+  #estado { margin-top: 12px; color: var(--acento); min-height: 22px; }
+  video { display: none; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Prueba de detección en vivo (en tu navegador)</h1>
+  <p>Esta prueba detecta los camiones con la tarjeta gráfica de <b>tu</b> computadora, sin servidor. Sirve para medir si el modo en vivo funcionaría bien en este equipo.</p>
+  <div class="botones">
+    <button class="primario" id="b-demo">▶ Probar con el video ORIGINAL</button>
+    <button id="b-pantalla">🖥 Compartir mi pantalla</button>
+    <button id="b-archivo">📁 Elegir un video de mi PC</button>
+    <button id="b-parar" disabled>■ Detener</button>
+    <input type="file" id="archivo" accept="video/*" hidden>
+  </div>
+  <div class="marco"><canvas id="lienzo" width="1280" height="720"></canvas></div>
+  <div class="datos">
+    <div class="dato"><b id="d-motor">—</b><span>Motor usado</span></div>
+    <div class="dato"><b id="d-ms">—</b><span>Milisegundos por cuadro</span></div>
+    <div class="dato"><b id="d-fps">—</b><span>Cuadros analizados por segundo</span></div>
+    <div class="dato"><b id="d-cam">—</b><span>Camiones en pantalla</span></div>
+  </div>
+  <p id="estado">Cargando el modelo (10 MB, solo la primera vez)…</p>
+  <video id="video" playsinline muted loop></video>
+</main>
+<script type="module">
+const local = new URLSearchParams(location.search).has("local");
+const base = local ? new URL("./ort/", location.href).href : "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.30.0/dist/";
+const ort = await import(base + "ort.all.min.mjs");
+import { Detector } from "./js/detector.js";
+ort.env.wasm.wasmPaths = base;
+ort.env.wasm.numThreads = 1;
+const $ = (id) => document.getElementById(id);
+const video = $("video"), lienzo = $("lienzo"), c = lienzo.getContext("2d");
+let det = null, motor = "", corriendo = false, flujo = null;
+
+async function cargar() {
+  const opciones = new URLSearchParams(location.search).get("motor");
+  const lista = opciones ? [opciones] : (navigator.gpu ? ["webgpu", "wasm"] : ["wasm"]);
+  for (const p of lista) {
+    try {
+      det = await Detector.crear(ort, "datos/modelo/best_obb_v2.onnx", [p]);
+      motor = p === "webgpu" ? "Tarjeta gráfica (WebGPU)" : "Procesador (WASM)";
+      $("d-motor").textContent = p === "webgpu" ? "GPU" : "CPU";
+      $("estado").textContent = `Modelo listo · usando ${motor}. Elige una opción de arriba.`;
+      return;
+    } catch (e) { console.warn(p, e); }
+  }
+  $("estado").textContent = "Este navegador no pudo cargar el modelo. Prueba con Chrome o Edge actualizados.";
+}
+
+async function empezar(fuente) {
+  if (!det) return;
+  parar();
+  if (fuente.stream) { flujo = fuente.stream; video.srcObject = flujo; video.loop = false; }
+  else { video.srcObject = null; video.src = fuente.url; video.loop = true; }
+  await video.play();
+  corriendo = true;
+  $("b-parar").disabled = false;
+  $("estado").textContent = `Analizando con ${motor}…`;
+  bucle();
+}
+function parar() {
+  corriendo = false;
+  if (flujo) { flujo.getTracks().forEach((t) => t.stop()); flujo = null; }
+  video.pause();
+  $("b-parar").disabled = true;
+}
+
+const tiempos = [];
+async function bucle() {
+  while (corriendo) {
+    const W = video.videoWidth, H = video.videoHeight;
+    if (!W) { await new Promise((r) => setTimeout(r, 100)); continue; }
+    if (lienzo.width !== W || lienzo.height !== H) { lienzo.width = W; lienzo.height = H; }
+    const t0 = performance.now();
+    c.drawImage(video, 0, 0, W, H);                       // el cuadro que se analiza
+    const cajas = await det.detectar(lienzo, W, H);
+    const ms = performance.now() - t0;
+    tiempos.push(ms); if (tiempos.length > 20) tiempos.shift();
+    c.lineWidth = Math.max(2, W / 640);
+    c.strokeStyle = "#4CD964";
+    for (const [x, y, w, h, a] of cajas) { c.save(); c.translate(x, y); c.rotate(a); c.strokeRect(-w / 2, -h / 2, w, h); c.restore(); }
+    const prom = tiempos.reduce((s, v) => s + v, 0) / tiempos.length;
+    $("d-ms").textContent = Math.round(prom);
+    $("d-fps").textContent = (1000 / prom).toFixed(1);
+    $("d-cam").textContent = cajas.length;
+    await new Promise((r) => requestAnimationFrame(r));
+  }
+}
+
+$("b-demo").onclick = () => empezar({ url: "datos/original/video.mp4" });
+$("b-archivo").onclick = () => $("archivo").click();
+$("archivo").onchange = () => { const f = $("archivo").files[0]; if (f) empezar({ url: URL.createObjectURL(f) }); };
+$("b-pantalla").onclick = async () => {
+  if (!navigator.mediaDevices?.getDisplayMedia) { $("estado").textContent = "Este navegador no permite compartir la pantalla (en celulares no se puede)."; return; }
+  try { empezar({ stream: await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 30 }, audio: false }) }); }
+  catch { $("estado").textContent = "No se compartió la pantalla."; }
+};
+$("b-parar").onclick = () => { parar(); $("estado").textContent = "Detenido."; };
+cargar();
+</script>
+</body>
+</html>
