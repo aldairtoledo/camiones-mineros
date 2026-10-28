@@ -236,10 +236,10 @@ button { cursor: pointer; }
 .vistas button:hover { color: var(--texto); background: var(--tarjeta); }
 .vistas button[aria-selected="true"] { background: var(--acento); color: var(--texto-acento); }
 .vista-monitoreo { display: flex; flex-direction: column; gap: 12px; flex: 1; min-height: 0; }
-.app.modo-resultados { grid-template-columns: minmax(0, 1fr); }
-.app.modo-resultados .area { grid-column: 1 / -1; }
+.app.modo-resultados, .app.modo-vivo { grid-template-columns: minmax(0, 1fr); }
+.app.modo-resultados .area, .app.modo-vivo .area { grid-column: 1 / -1; }
 .app.modo-resultados .lateral, .app.modo-resultados .herramientas,
-.app.modo-resultados #b-panel { display: none; }
+.app.modo-resultados #b-panel, .app.modo-vivo .lateral, .app.modo-vivo .herramientas, .app.modo-vivo #b-panel { display: none; }
 select { height: 34px; padding: 0 8px; border: 1px solid var(--borde); border-radius: 8px; background: var(--tarjeta);
   color: var(--texto); font: inherit; }
 
@@ -470,3 +470,29 @@ select { height: 34px; padding: 0 8px; border: 1px solid var(--borde); border-ra
 .ce-res.ce-ok { color: #4CD964; } .ce-res.ce-aviso { color: var(--acento); }
 .ce-fila-botones { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .ce-resumen.ce-error { color: #FF6B6B; }
+
+/* ---------------------------------------------------------------- En vivo */
+.vista-vivo { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 12px; }
+.vista-vivo[hidden] { display: none; }
+.vivo-fuentes { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.vivo-fuentes .boton { display: inline-flex; align-items: center; justify-content: center; gap: 8px; width: auto; flex: none; padding: 0 16px; }
+.vivo-fuentes .boton svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.vivo-ayuda { flex: 1 1 260px; margin: 0 0 0 6px; font-size: 12.5px; line-height: 1.45; color: var(--suave); }
+.vivo-marco canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+.vivo-insignia { position: absolute; top: 12px; left: 12px; padding: 3px 9px; border-radius: 6px; background: rgba(18,21,26,.82);
+  color: #FF6B6B; font-size: 12px; font-weight: 600; letter-spacing: .04em; }
+.vivo-panel { gap: 10px; overflow-y: auto; }
+.vivo-panel > * { flex-shrink: 0; }
+.vivo-dato { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; padding: 10px 12px; border-radius: 10px;
+  background: var(--tarjeta); font-size: 13px; color: var(--suave); }
+.vivo-dato strong { color: var(--texto); font-size: 16px; font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+.vivo-dato.grande strong { font-size: 26px; color: var(--acento); }
+.vivo-nota { margin: 2px 2px 0; font-size: 12px; line-height: 1.45; }
+.vivo-nota.vivo-alerta { padding: 9px 11px; border: 1px solid var(--acento); border-radius: 10px; background: #2E2818; color: var(--texto); }
+@media (max-width: 900px) {
+  .vivo-ayuda { margin: 4px 0 0; flex-basis: 100%; }
+  .vivo-fuentes .boton { flex: 1 1 calc(50% - 8px); justify-content: center; }
+}
+.app.modo-vivo .titulo > * { display: none; }
+.app.modo-vivo .titulo::before { content: "Análisis en vivo"; display: block; font-size: 17px; font-weight: 600; }
+.app.modo-vivo .titulo::after { content: "Detección y seguimiento en tu propia computadora"; display: block; font-size: 12.5px; color: var(--suave); }
