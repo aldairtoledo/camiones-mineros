@@ -368,3 +368,32 @@ select { height: 34px; padding: 0 8px; border: 1px solid var(--borde); border-ra
 .mini[aria-pressed="true"] { background: var(--acento); border-color: var(--acento); color: var(--texto-acento); }
 .fila-controles .izq { flex-wrap: wrap; }
 @media (max-width: 560px) { .mini { width: 36px; height: 34px; padding: 0; justify-content: center; } .mini span { display: none; } .mini svg { width: 17px; height: 17px; } }
+
+/* ---- Abrir video: demostraciones y "Analizar mi video" */
+.dlg-videos { width: min(520px, calc(100vw - 32px)); }
+.pestanas-dlg { margin: 10px 0 6px; }
+.pestanas-dlg button { flex: 1; }
+.form-subir { display: grid; gap: 12px; margin-top: 6px; }
+.campo { display: grid; gap: 5px; }
+.campo .etq { font-size: 13px; font-weight: 600; }
+.campo small { font-size: 12px; line-height: 1.4; }
+.campo input[type="number"], .campo input[type="password"], .campo select { height: 36px; padding: 0 10px; border: 1px solid var(--borde);
+  border-radius: 8px; background: var(--tarjeta); color: var(--texto); font: inherit; width: 100%; }
+.campo input[type="file"] { font: inherit; font-size: 13px; color: var(--suave); }
+.campo input[type="file"]::file-selector-button { margin-right: 10px; padding: 7px 12px; border: 1px solid var(--borde); border-radius: 8px;
+  background: var(--tarjeta); color: var(--texto); font: inherit; font-weight: 600; cursor: pointer; }
+.form-subir .boton.primario { width: 100%; height: 40px; }
+.f-error { margin: 0; padding: 8px 10px; border-radius: 8px; background: #3A1E22; color: #FF9B9B; font-size: 13px; }
+.nota-subir { font-size: 12px; margin: 0; }
+.srv-estado { display: flex; gap: 8px; align-items: center; margin: 8px 0 4px; font-size: 13px; color: var(--suave); }
+.srv-estado::before { content: ""; width: 9px; height: 9px; border-radius: 50%; background: var(--suave); flex: none; }
+.srv-estado.encendido { color: var(--texto); }
+.srv-estado.encendido::before { background: #4CD964; }
+.srv-estado.apagado::before { background: #FF6B6B; }
+.subida-progreso h4 { margin: 12px 0 10px; font-size: 15px; }
+.barra-progreso { height: 10px; border-radius: 6px; background: var(--tarjeta); overflow: hidden; border: 1px solid var(--borde); }
+.barra-progreso span { display: block; height: 100%; width: 0; background: var(--info, #4DA3FF); border-radius: 6px; transition: width .4s; }
+.barra-progreso.ok span { background: #4CD964; }
+.dlg-botones.izq { justify-content: flex-start; }
+.aviso-trabajo { margin: 8px 0 0; padding: 8px 10px; border-radius: 8px; background: #1C2738; color: var(--texto); font-size: 12.5px; line-height: 1.45; }
+.aviso-trabajo button { margin-top: 6px; }

@@ -7,6 +7,7 @@ import { recalcular, combinarAvisos, puntoEnPoligono, redondearPar, area, g } fr
 import { ROLES } from "./resultados.js";
 import { mostrarResultados, redimensionarResultados, elegirTabla, elegirCorte, cargarTablero, corteResultados } from "./vista_resultados.js";
 import { datosParaExcel, generarExcel } from "./excel_web.js";
+import { iniciarSubida, alAbrirSubida, urlArchivos, servidorConfigurado, estadoTrabajo } from "./analisis.js";
 
 // ---------------------------------------------------------------- constantes (de app.py)
 const COLOR_ZONA = { acumulativa: "#FF8000", dinamica: "#FF00FF" };
@@ -98,21 +99,27 @@ document.querySelectorAll("[data-cerrar]").forEach((b) => b.addEventListener("cl
 
 // ---------------------------------------------------------------- carga de datos
 async function cargar() {
+  const parametros = new URLSearchParams(location.search);
+  const trabajo = parametros.get("trabajo");
   try {
     const r = await fetch("datos/catalogo.json", { cache: "no-cache" });
     if (!r.ok) throw new Error();
     E.catalogo = (await r.json()).videos || [];
   } catch {
+    if (trabajo) E.catalogo = [];
+    else {
     $("mensaje-video").innerHTML = "No se encontraron datos de demostración.<br>Corre <b>exportar_demo.py</b> en la laptop " +
       "y abre esta página con un servidor (ver instrucciones).";
     $("t-video").textContent = "Sin datos";
     return;
+    }
   }
+  if (trabajo) return cargarTrabajo(trabajo);
   if (!E.catalogo.length) {
     $("mensaje-video").textContent = "Todavía no hay videos de demostración. Corre exportar_demo.py en la laptop.";
     return;
   }
-  const pedido = new URLSearchParams(location.search).get("demo");
+  const pedido = parametros.get("demo");
   const elegido = E.catalogo.find((v) => v.nombre === pedido) || E.catalogo[0];
   E.base = `datos/${elegido.nombre}/`;
   $("mensaje-video").textContent = "Cargando los datos del análisis…";
@@ -123,6 +130,57 @@ async function cargar() {
     $("mensaje-video").textContent = "No se pudieron leer los datos de este video (demo.json).";
     return;
   }
+  iniciarVideo(demo);
+}
+
+// Video subido por un visitante: los resultados estan en el servidor de analisis (24 horas).
+async function cargarTrabajo(id) {
+  const volver = ' <a href="./">Ver la demostración</a>';
+  if (!servidorConfigurado()) {
+    $("mensaje-video").innerHTML = "Esta página no tiene configurado el servidor de análisis." + volver;
+    return;
+  }
+  $("mensaje-video").textContent = "Cargando tu análisis…";
+  let info, demo;
+  try {
+    info = await estadoTrabajo(id);
+  } catch (error) {
+    $("mensaje-video").innerHTML = (error.status === 404
+      ? "Este análisis ya no existe: los videos subidos se guardan solo 24 horas."
+      : "No se pudo conectar con el servidor de análisis.") + volver;
+    $("t-video").textContent = "Análisis no disponible";
+    return;
+  }
+  if (info.estado !== "listo") {
+    $("mensaje-video").innerHTML = `Este video todavía se está analizando (${info.mensaje || info.estado}). ` +
+      "Recarga la página en un momento." + volver;
+    $("t-video").textContent = info.video || "Análisis en curso";
+    return;
+  }
+  E.base = urlArchivos(id);
+  try {
+    demo = await (await fetch(E.base + "demo.json")).json();
+  } catch {
+    $("mensaje-video").innerHTML = "No se pudieron leer los datos de este análisis." + volver;
+    return;
+  }
+  E.remoto = { id, info };
+  iniciarVideo(demo);
+  const horas = Math.max(1, Math.round((info.borra_en_s || 0) / 3600));
+  $("t-pie").textContent = `Video subido · analizado el ${demo.generado} en modo ${demo.modo} (servidor en la nube). ` +
+    `Se borra en unas ${horas} h.`;
+  const aviso = document.createElement("div");
+  aviso.className = "aviso-trabajo";
+  aviso.innerHTML = `Este es <b>tu video</b>. Dibuja tus zonas y mira los Resultados. El enlace funciona ${horas} h más.` +
+    '<br><button class="boton" id="b-copiar-enlace">Copiar enlace</button>';
+  $("t-pie").after(aviso);
+  $("b-copiar-enlace").addEventListener("click", async () => {
+    try { await navigator.clipboard.writeText(location.href); toast("Enlace copiado. Funciona hasta que el video se borre."); }
+    catch { toast(location.href, 8000); }
+  });
+}
+
+function iniciarVideo(demo) {
   E.demo = demo;
   E.georef = Georreferencia.desdeDict(demo.calibracion);
   E.zonas = zonasDelAnalisis();
@@ -894,6 +952,19 @@ $("b-directo").addEventListener("click", () => {
 });
 
 // ---------------------------------------------------------------- panel lateral: video
+function pestanaVideos(subir) {
+  $("pane-demos").hidden = subir;
+  $("pane-subir").hidden = !subir;
+  for (const [id, activo] of [["t-demos", !subir], ["t-subir", subir]]) {
+    $(id).classList.toggle("activo", activo);
+    $(id).setAttribute("aria-selected", String(activo));
+  }
+  if (subir) alAbrirSubida();
+}
+$("t-demos").addEventListener("click", () => pestanaVideos(false));
+$("t-subir").addEventListener("click", () => pestanaVideos(true));
+iniciarSubida();
+
 $("b-abrir").addEventListener("click", () => {
   const lista = $("lista-videos");
   lista.innerHTML = "";
@@ -908,6 +979,8 @@ $("b-abrir").addEventListener("click", () => {
     });
     lista.appendChild(b);
   }
+  pestanaVideos(!!E.abrirSubida);
+  E.abrirSubida = false;
   $("dlg-videos").showModal();
 });
 $("b-reiniciar").addEventListener("click", reiniciar);
@@ -1147,7 +1220,8 @@ $("e-limite").addEventListener("input", () => {
 
 document.querySelectorAll("#seg-velocidad button").forEach((b) => b.addEventListener("click", () => {
   if (b.classList.contains("activo")) return;
-  toast(`En la demostración el video ya está analizado (modo ${E.demo?.modo}). Elegir la velocidad será parte del modo análisis.`);
+  toast(`Este video ya está analizado (modo ${E.demo?.modo}). Para analizar un video tuyo con otra velocidad, ` +
+        "usa Abrir video → Analizar mi video.", 6000);
 }));
 
 // Exportar a Excel: si el visitante no cambio nada, se descarga el Excel que genero la laptop.
@@ -1162,9 +1236,16 @@ function descargarBlob(nombre, blob) {
   setTimeout(() => URL.revokeObjectURL(url), 4000);
 }
 
-function descargarOriginal() {
-  const a = Object.assign(document.createElement("a"), { href: E.base + "reporte.xlsx",
-                                                          download: `reporte_${E.demo.nombre}.xlsx` });
+async function descargarOriginal() {
+  const nombre = `reporte_${E.remoto ? (E.demo.video || "mi_video").replace(/\.[^.]+$/, "") : E.demo.nombre}.xlsx`;
+  if (E.remoto) {                       // otro dominio: el navegador no respeta "download", se baja como Blob
+    estado("Descargando el reporte Excel…", C.ok);
+    const r = await fetch(E.base + "reporte.xlsx");
+    if (!r.ok) throw new Error("sin reporte");
+    descargarBlob(nombre, await r.blob());
+    return;
+  }
+  const a = Object.assign(document.createElement("a"), { href: E.base + "reporte.xlsx", download: nombre });
   document.body.appendChild(a);
   a.click();
   a.remove();
@@ -1185,7 +1266,10 @@ async function exportarExcel(desdeResultados = false) {
   const hayDirecto = E.iniciado && E.vivo < duracion() - 0.5;
   const corte = desdeResultados ? corteResultados() : (hayDirecto ? "directo" : "todo");
   const hasta = corte === "directo" && hayDirecto ? E.vivo : null;
-  if (!E.cambiado && hasta == null) { descargarOriginal(); return; }
+  if (!E.cambiado && hasta == null) {
+    try { await descargarOriginal(); } catch { toast("No se pudo descargar el Excel. Inténtalo de nuevo."); }
+    return;
+  }
   E.generandoExcel = true;
   textoBotonesExcel("Preparando…", true);
   toast(`Preparando tu Excel ${E.cambiado ? "con tus zonas y límites" : `hasta el segundo ${horaCorta(hasta)}`}. ` +
@@ -1196,7 +1280,8 @@ async function exportarExcel(desdeResultados = false) {
                                      limiteGeneral: E.limiteGeneral, hasta, georef: E.georef });
     const blob = await generarExcel(entrada, (paso) => estado(paso, C.acento));
     const sufijo = hasta == null ? "" : `_hasta_${horaCorta(hasta).replace(/:/g, "-")}`;
-    descargarBlob(`reporte_${E.demo.nombre}${E.cambiado ? "_mis_zonas" : ""}${sufijo}.xlsx`, blob);
+    const base = E.remoto ? (E.demo.video || "mi_video").replace(/\.[^.]+$/, "") : E.demo.nombre;
+    descargarBlob(`reporte_${base}${E.cambiado ? "_mis_zonas" : ""}${sufijo}.xlsx`, blob);
     estado(`Excel listo: ${hasta == null ? "todo el video" : `hasta el segundo ${horaCorta(hasta)}`}` +
            `${E.cambiado ? ", con tus zonas y límites" : ""}.`, C.ok);
     toast("Tu Excel se descargó. Búscalo en tu carpeta de Descargas.", 5000);

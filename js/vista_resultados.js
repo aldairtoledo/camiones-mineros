@@ -41,7 +41,7 @@ export async function mostrarResultados(ctx, corteInicial) {
   ESTADO.ctx = ctx;
   if (corteInicial) ESTADO.corte = corteInicial;
   const raiz = $("vista-resultados");
-  if (!ESTADO.tablero) {
+  if (!ESTADO.tablero || !window.echarts) {       // el tablero puede venir ya cargado por el Excel
     $("res-kpis").innerHTML = '<p class="cargando-res">Preparando los resultados…</p>';
     try {
       await Promise.all([cargarTablero(ctx.base), cargarECharts()]);
