@@ -810,7 +810,8 @@ def _hoja_posiciones(wb, datos, aviso=None):
                  f.get("centro_x"), f.get("centro_y")]
         filas.append(fila)
     origen = ("X hacia la derecha e Y hacia arriba, desde la esquina inferior izquierda del video"
-              if datos.eje_x == "x_m" else "píxeles de la imagen original (origen arriba a la izquierda)")
+              if datos.eje_x == "x_m" else "Este y Norte en metros, coordenadas UTM" if datos.eje_x == "este_m"
+              else "píxeles de la imagen original (origen arriba a la izquierda)")
     _cabecera_hoja(ws, "Posiciones",
                    f"Dónde estaba cada camión cada {datos.intervalo:g} s ({origen}). 'Estimada' = el camión estaba "
                    "tapado o junto a otro y su posición se calculó. Usa los filtros del encabezado para ver un "
