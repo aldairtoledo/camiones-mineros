@@ -55,12 +55,17 @@ export async function mostrarResultados(ctx, corteInicial) {
 }
 
 /** Datos del dashboard (resultados.json); los usa tambien el Excel del visitante. */
+let ajustarTablero = (t) => t;
+/** fn(tablero) se aplica al tablero recien cargado (por ejemplo, la calibracion del visitante). */
+export function alCargarTablero(fn) { ajustarTablero = fn; }
+export const tableroCargado = () => ESTADO.tablero;
+
 export function cargarTablero(base) {
   if (ESTADO.tablero) return Promise.resolve(ESTADO.tablero);
   ESTADO.cargando = ESTADO.cargando || fetch(base + "resultados.json")
     .then((r) => { if (!r.ok) throw new Error("sin resultados.json"); return r.json(); })
     .catch((e) => { ESTADO.cargando = null; throw e; });
-  return ESTADO.cargando.then((t) => (ESTADO.tablero = t));
+  return ESTADO.cargando.then((t) => { ajustarTablero(t); return (ESTADO.tablero = t); });
 }
 export const corteResultados = () => ESTADO.corte;
 
@@ -94,7 +99,7 @@ function pintar() {
   $("res-sub").textContent = `${E.demo.video} · ${R.completo ? `todo el video (${hms(dur)})` : `primeros ${hms(R.T)} de ${hms(dur)}`} · calibración ${calib}`;
   const notas = [];
   if (!E.iniciado) notas.push("Todavía no iniciaste el video, así que ves el resumen del análisis completo.");
-  if (E.cambiado) notas.push("Estos resultados usan tus zonas y límites. El botón Exportar a Excel arma tu Excel con ellos.");
+  if (E.cambiado) notas.push("Estos resultados usan tus zonas, límites y calibración. El botón Exportar a Excel arma tu Excel con ellos.");
   $("res-nota").hidden = !notas.length;
   $("res-nota").textContent = notas.join(" ");
   pintarKpis(R);

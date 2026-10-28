@@ -5,8 +5,10 @@
 import { Georreferencia, pasoGrilla } from "./georef.js";
 import { recalcular, combinarAvisos, puntoEnPoligono, redondearPar, area, g } from "./recalculo.js";
 import { ROLES } from "./resultados.js";
-import { mostrarResultados, redimensionarResultados, elegirTabla, elegirCorte, cargarTablero, corteResultados } from "./vista_resultados.js";
+import { mostrarResultados, redimensionarResultados, elegirTabla, elegirCorte, cargarTablero, corteResultados,
+         alCargarTablero, tableroCargado } from "./vista_resultados.js";
 import { datosParaExcel, generarExcel } from "./excel_web.js";
+import { prepararEscala, escalarDemo, escalarTablero, abrirEditor } from "./calibracion.js";
 import { iniciarSubida, alAbrirSubida, urlArchivos, servidorConfigurado, estadoTrabajo } from "./analisis.js";
 
 // ---------------------------------------------------------------- constantes (de app.py)
@@ -183,6 +185,8 @@ async function cargarTrabajo(id) {
 function iniciarVideo(demo) {
   E.demo = demo;
   E.georef = Georreferencia.desdeDict(demo.calibracion);
+  E.escalaBase = prepararEscala(demo);
+  alCargarTablero((t) => escalarTablero(E.escalaBase, t, E.georef));
   E.zonas = zonasDelAnalisis();
   E.limiteGeneral = demo.limite_general;
   E.original = firma();
@@ -216,7 +220,7 @@ function iniciarVideo(demo) {
 // ---------------------------------------------------------------- recalculo (zonas y limites)
 const zonasDelAnalisis = () => E.demo.zonas.map((z) => ({ puntos: z.puntos.map((p) => [...p]), tipo: z.tipo,
   nombre: z.nombre || "", limite: z.limite, rol: ROLES[z.rol] ? z.rol : "" }));
-const firma = () => JSON.stringify({ z: E.zonas, l: E.limiteGeneral || null });
+const firma = () => JSON.stringify({ z: E.zonas, l: E.limiteGeneral || null, c: E.georef ? E.georef.escalaMPx : null });
 
 function recalcularTodo() {
   const d = E.demo;
@@ -1154,7 +1158,15 @@ $("f-zonas").addEventListener("change", async (e) => {
     }
     recalcularTodo();
     estado(`${nuevas.length} zonas cargadas. El conteo se recalculó con todo el video.`, C.ok);
-    if (datos.georreferencia) toast("El archivo trae una calibración: en la demostración se mantiene la del análisis original.");
+    if (datos.georreferencia) {
+      let geo = null;
+      try { geo = Georreferencia.desdeDict(datos.georreferencia); } catch { geo = null; }
+      if (geo && geo.esPlano() && E.escalaBase.editable) {
+        if (Math.abs(geo.escalaMPx / E.georef.escalaMPx - 1) > 1e-9) cambiarCalibracion(geo, false);
+      } else {
+        toast("El archivo trae una calibración con puntos UTM: aquí se mantiene la del análisis.");
+      }
+    }
   } catch {
     estado("El archivo no tiene un formato válido de zonas.", C.error);
   }
@@ -1172,7 +1184,7 @@ function actualizarCalibracion() {
     el.textContent = `⚠ Revisa la calibración: ${geo.info.revisar}. Las velocidades pueden salir mal.`;
     el.style.color = C.acento;
   } else if (geo.esPlano() && (fuente.startsWith("Solo camión") || fuente.startsWith("Automática"))) {
-    const origen = fuente.startsWith("Automática") ? "automática, camión de 15 m" : "con el tamaño del camión";
+    const origen = fuente.startsWith("Automática") ? `automática, camión de ${g(geo.info.largo_m || 15)} m` : "con el tamaño del camión";
     el.textContent = `≈ Aproximada (${origen}, ±\u00a0${g(pct || 7)}\u00a0%): ${medida}. Para más precisión, calibra con una distancia conocida.`;
     el.style.color = C.acento;
   } else if (geo.esPlano()) {
@@ -1184,7 +1196,32 @@ function actualizarCalibracion() {
   }
 }
 
+// Calibracion editable (plano local): se cambia la escala sin volver a analizar el video.
+function cambiarCalibracion(geo, restaurar) {
+  const anterior = E.georef;
+  E.georef = geo;
+  escalarDemo(E.escalaBase, E.demo, geo);
+  escalarTablero(E.escalaBase, tableroCargado(), geo);
+  recalcularTodo();
+  actualizarCalibracion();
+  actualizarBotones();
+  const k = anterior ? geo.escalaMPx / anterior.escalaMPx : 1;
+  const cambio = Math.abs(k - 1) > 0.005 ? ` Velocidades y distancias ×${k.toFixed(2)}.` : "";
+  estado(restaurar ? "Se restauró la calibración del análisis." : `Calibración aplicada.${cambio}`, C.ok);
+  toast(restaurar ? "Calibración original restaurada." :
+        `Calibración aplicada a todo el video: velocidades, distancias, límites, Resultados y Excel.${cambio}`, 6000);
+}
+
 $("b-calibracion").addEventListener("click", () => {
+  if (E.demo && E.escalaBase?.editable) {
+    if (E.dibujo) cancelarZona();
+    if (E.regla) activarRegla(false);
+    video.pause();
+    abrirEditor({ demo: E.demo, base: E.escalaBase, georef: E.georef, video,
+                  cambiada: Math.abs(E.georef.escalaMPx / E.escalaBase.georef.escalaMPx - 1) > 1e-9,
+                  alAplicar: cambiarCalibracion, confirmar });
+    return;
+  }
   const geo = E.georef, c = $("calib-contenido");
   if (!geo) {
     c.innerHTML = "<p>Este video se analizó sin calibración, así que las medidas están en píxeles.</p>";
@@ -1200,7 +1237,7 @@ $("b-calibracion").addEventListener("click", () => {
     if (i.incertidumbre_escala_pct) filas.push(["Precisión de distancias", `± ${i.incertidumbre_escala_pct.toFixed(1)} %`]);
     if (i.largo_m) filas.push(["Largo del camión usado", `${g(i.largo_m)} m (${i.camiones_medidos || "?"} camiones medidos)`]);
     c.innerHTML = `<dl class="datos-calib">${filas.map(([a, b]) => `<dt>${a}</dt><dd>${b}</dd>`).join("")}</dl>
-      <p class="suave">Es la calibración con que se analizó el video en la laptop. El editor completo (camión, distancias conocidas y puntos UTM) llega en la próxima entrega de la web.</p>`;
+      <p class="suave">Este video se calibró con puntos UTM en la app de escritorio; aquí solo se puede ver.</p>`;
   }
   $("dlg-calibracion").showModal();
 });
@@ -1281,9 +1318,9 @@ async function exportarExcel(desdeResultados = false) {
     const blob = await generarExcel(entrada, (paso) => estado(paso, C.acento));
     const sufijo = hasta == null ? "" : `_hasta_${horaCorta(hasta).replace(/:/g, "-")}`;
     const base = E.remoto ? (E.demo.video || "mi_video").replace(/\.[^.]+$/, "") : E.demo.nombre;
-    descargarBlob(`reporte_${base}${E.cambiado ? "_mis_zonas" : ""}${sufijo}.xlsx`, blob);
+    descargarBlob(`reporte_${base}${E.cambiado ? "_mis_ajustes" : ""}${sufijo}.xlsx`, blob);
     estado(`Excel listo: ${hasta == null ? "todo el video" : `hasta el segundo ${horaCorta(hasta)}`}` +
-           `${E.cambiado ? ", con tus zonas y límites" : ""}.`, C.ok);
+           `${E.cambiado ? ", con tus zonas, límites y calibración" : ""}.`, C.ok);
     toast("Tu Excel se descargó. Búscalo en tu carpeta de Descargas.", 5000);
   } catch (error) {
     console.error(error);

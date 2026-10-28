@@ -61,7 +61,7 @@
 
     <section class="seccion">
       <h2>COORDENADAS</h2>
-      <button class="boton" id="b-calibracion">⌖&nbsp; Ver calibración</button>
+      <button class="boton" id="b-calibracion">⌖&nbsp; Calibrar</button>
       <p class="nota" id="t-calibracion"></p>
     </section>
 
@@ -306,6 +306,53 @@
   <div class="dlg-cab"><h3>Calibración del video</h3></div>
   <div id="calib-contenido"></div>
   <div class="dlg-botones"><button class="boton primario" data-cerrar>Entendido</button></div>
+</dialog>
+
+<dialog id="dlg-calib-editor" class="dialogo calib-editor" aria-labelledby="ce-titulo">
+  <div class="ce-imagen">
+    <canvas id="ce-lienzo" aria-label="Imagen del video para marcar distancias"></canvas>
+    <div class="ce-herr">
+      <button class="boton cuadrado" id="ce-menos" aria-label="Alejar">−</button>
+      <button class="boton" id="ce-zoom" title="Volver al 100 %">100 %</button>
+      <button class="boton cuadrado" id="ce-mas" aria-label="Acercar">+</button>
+    </div>
+    <p class="ce-pie" id="ce-pie"></p>
+  </div>
+  <div class="ce-panel">
+    <h3 id="ce-titulo">Calibrar coordenadas</h3>
+    <p class="suave ce-intro">Convierte el video en un plano en metros: posición, distancia y velocidad de cada camión, como un GPS.
+      No hace falta volver a analizar el video.</p>
+    <p class="ce-et">¿Cómo quieres calcular la escala?</p>
+    <div class="segmentado ce-eleccion" id="ce-eleccion" role="radiogroup" aria-label="Forma de calcular la escala">
+      <button role="radio" data-v="Solo camión">Solo camión</button>
+      <button role="radio" data-v="Solo distancias">Solo distancias</button>
+      <button role="radio" data-v="Combinar ambos">Combinar ambos</button>
+    </div>
+    <p class="suave ce-ayuda" id="ce-ayuda"></p>
+    <section id="ce-sec-camion">
+      <p class="ce-et" id="ce-t-camion">1.  Tamaño real del camión</p>
+      <div class="ce-medidas">
+        <label>Largo <input type="text" id="ce-largo" inputmode="decimal" value="15"> m</label>
+        <label>Ancho <input type="text" id="ce-ancho" inputmode="decimal" placeholder="opcional"> m</label>
+      </div>
+      <p class="suave ce-nota" id="ce-medida"></p>
+    </section>
+    <section id="ce-sec-dist">
+      <p class="ce-et" id="ce-t-dist">2.  Distancias conocidas</p>
+      <p class="suave ce-nota">Marca dos puntos del video y escribe cuántos metros hay entre ellos. Puedes agregar varias.</p>
+      <button class="boton ce-agregar" id="ce-agregar">+  Agregar distancia</button>
+      <div id="ce-lista" class="ce-lista"></div>
+    </section>
+    <div class="ce-caja ce-aviso" id="ce-ajuste" hidden></div>
+    <div class="ce-caja ce-consejo" id="ce-consejo" hidden></div>
+    <div class="ce-caja ce-ok" id="ce-impacto" hidden></div>
+    <pre class="ce-resumen" id="ce-resumen"></pre>
+    <div class="dlg-botones ce-botones">
+      <button class="boton" id="ce-cancelar">Cancelar</button>
+      <button class="boton" id="ce-original" hidden>Volver a la original</button>
+      <button class="boton primario" id="ce-aplicar">Aplicar</button>
+    </div>
+  </div>
 </dialog>
 
 <dialog id="dlg-confirmar" class="dialogo">
