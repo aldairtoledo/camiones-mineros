@@ -9,6 +9,7 @@ import { mostrarResultados, redimensionarResultados, elegirTabla, elegirCorte, c
          alCargarTablero, tableroCargado } from "./vista_resultados.js";
 import { datosParaExcel, generarExcel } from "./excel_web.js";
 import { prepararEscala, escalarDemo, escalarTablero, abrirEditor } from "./calibracion.js";
+import { iniciarVivo, vivoVisible } from "./vivo/vivo.js";
 import { iniciarSubida, alAbrirSubida, urlArchivos, servidorConfigurado, estadoTrabajo } from "./analisis.js";
 
 // ---------------------------------------------------------------- constantes (de app.py)
@@ -1550,7 +1551,7 @@ function cerrarPoligono() {
 document.addEventListener("keydown", (e) => {
   if (document.querySelector("dialog[open]")) return;
   const escribiendo = ["INPUT", "TEXTAREA"].includes(document.activeElement?.tagName);
-  if (E.pestana === "resultados") return;
+  if (E.pestana === "resultados" || E.pestana === "vivo") return;
   if (e.key === " " && !escribiendo && !E.dibujo) {
     e.preventDefault();
     pausar();
@@ -1589,18 +1590,30 @@ const contextoResultados = {
 
 function cambiarPestana(nombre, actualizarDireccion = true) {
   if (!E.demo && nombre === "resultados") return;
-  const res = nombre === "resultados";
+  const res = nombre === "resultados", vivo = nombre === "vivo";
   const antes = E.pestana;
   E.pestana = nombre;
   $("app").classList.toggle("modo-resultados", res);
-  $("vista-monitoreo").hidden = res;
+  $("app").classList.toggle("modo-vivo", vivo);
+  $("vista-monitoreo").hidden = res || vivo;
   $("vista-resultados").hidden = !res;
-  for (const [id, activo] of [["tab-monitoreo", !res], ["tab-resultados", res]]) {
+  $("vista-vivo").hidden = !vivo;
+  vivoVisible(vivo);
+  for (const [id, activo] of [["tab-monitoreo", !res && !vivo], ["tab-resultados", res], ["tab-vivo", vivo]]) {
     $(id).setAttribute("aria-selected", String(activo));
     $(id).tabIndex = activo ? 0 : -1;
   }
-  if (actualizarDireccion) history.replaceState(null, "", res ? "#resultados" : location.pathname + location.search);
-  if (res) {
+  if (actualizarDireccion) history.replaceState(null, "", res ? "#resultados" : vivo ? "#vivo" : location.pathname + location.search);
+  if (vivo) {
+    if (antes !== "vivo") {
+      if (reproduciendo()) { video.pause(); estado("En pausa (viendo En vivo).", C.suave); }
+      if (E.regla) activarRegla(false);
+      if (E.dibujo) cancelarZona();
+      abrirLateral(false);
+      actualizarBotones();
+    }
+    window.scrollTo(0, 0);
+  } else if (res) {
     if (antes !== "resultados") {
       if (reproduciendo()) { video.pause(); estado("En pausa (viendo resultados).", C.suave); }
       if (E.regla) activarRegla(false);
@@ -1649,11 +1662,13 @@ document.addEventListener("fullscreenchange", alCambiarPantalla);
 document.addEventListener("webkitfullscreenchange", alCambiarPantalla);
 $("tab-monitoreo").addEventListener("click", () => cambiarPestana("monitoreo"));
 $("tab-resultados").addEventListener("click", () => cambiarPestana("resultados"));
+$("tab-vivo").addEventListener("click", () => cambiarPestana("vivo"));
+iniciarVivo();
 $("tab-monitoreo").addEventListener("keydown", (e) => { if (e.key === "ArrowRight") { $("tab-resultados").focus(); cambiarPestana("resultados"); } });
 $("tab-resultados").addEventListener("keydown", (e) => { if (e.key === "ArrowLeft") { $("tab-monitoreo").focus(); cambiarPestana("monitoreo"); } });
 document.querySelectorAll("#seg-corte button").forEach((b) => b.addEventListener("click", () => elegirCorte(b.dataset.corte)));
 document.querySelectorAll("#seg-tabla button").forEach((b) => b.addEventListener("click", () => elegirTabla(b.dataset.tabla)));
-window.addEventListener("hashchange", () => cambiarPestana(location.hash === "#resultados" ? "resultados" : "monitoreo", false));
+window.addEventListener("hashchange", () => cambiarPestana(location.hash === "#resultados" ? "resultados" : location.hash === "#vivo" ? "vivo" : "monitoreo", false));
 window.addEventListener("resize", () => { if (E.pestana === "resultados") redimensionarResultados(); });
 
 // ---------------------------------------------------------------- arranque
@@ -1663,4 +1678,5 @@ crearRanuras();
 $("app").style.setProperty("--color-zona", COLOR_ZONA.acumulativa);
 actualizarBotones();
 requestAnimationFrame(ciclo);
+if (location.hash === "#vivo") cambiarPestana("vivo", false);
 cargar().then(() => { if (location.hash === "#resultados") cambiarPestana("resultados", false); });
