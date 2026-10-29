@@ -67,6 +67,12 @@ export function cargarTablero(base) {
     .catch((e) => { ESTADO.cargando = null; throw e; });
   return ESTADO.cargando.then((t) => { ajustarTablero(t); return (ESTADO.tablero = t); });
 }
+/** Resultados ya calculados en este navegador ("Analizar mi video" en mi computadora). */
+export function ponerTablero(t) {
+  ESTADO.cargando = null;
+  ESTADO.corte = "todo";
+  ESTADO.tablero = t ? (ajustarTablero(t), t) : null;
+}
 export const corteResultados = () => ESTADO.corte;
 
 export function redimensionarResultados() {

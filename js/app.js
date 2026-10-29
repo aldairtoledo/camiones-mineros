@@ -6,10 +6,10 @@ import { Georreferencia, pasoGrilla } from "./georef.js";
 import { recalcular, combinarAvisos, puntoEnPoligono, redondearPar, area, g } from "./recalculo.js";
 import { ROLES } from "./resultados.js";
 import { mostrarResultados, redimensionarResultados, elegirTabla, elegirCorte, cargarTablero, corteResultados,
-         alCargarTablero, tableroCargado } from "./vista_resultados.js";
+         alCargarTablero, tableroCargado, ponerTablero } from "./vista_resultados.js";
 import { datosParaExcel, generarExcel } from "./excel_web.js";
 import { prepararEscala, escalarDemo, escalarTablero, abrirEditor } from "./calibracion.js";
-import { iniciarVivo, vivoVisible } from "./vivo/vivo.js";
+import { iniciarVivo, vivoVisible, analizarArchivo, revisarEquipo, analizandoArchivo } from "./vivo/vivo.js";
 import { iniciarSubida, alAbrirSubida, urlArchivos, servidorConfigurado, estadoTrabajo } from "./analisis.js";
 
 // ---------------------------------------------------------------- constantes (de app.py)
@@ -183,6 +183,32 @@ async function cargarTrabajo(id) {
   });
 }
 
+// "Analizar mi video" -> "En mi computadora": el analisis termino en este navegador (vivo/vivo.js).
+// Se abre igual que un video de demostracion; el video y los resultados estan solo en esta pestaña.
+function abrirAnalisisLocal({ demo, tablero, url }) {
+  video.pause();
+  E.iniciado = false; E.vivo = 0; E.tAvisos = 0; E.fichaFija = null;
+  if (E.ranuras.length) limpiarAvisos();
+  if (E.regla) activarRegla(false);
+  if (E.dibujo) cancelarZona();
+  E.remoto = null;
+  E.local = true;
+  E.base = "";
+  demo.archivo_video = url;
+  ponerTablero(tablero);
+  document.querySelector(".aviso-trabajo")?.remove();
+  iniciarVideo(demo);
+  $("t-pie").textContent = `Tu video · analizado el ${demo.generado} en ${demo.dispositivo} (modo ${demo.modo}). ` +
+    "No se subió a ningún servidor.";
+  const aviso = document.createElement("div");
+  aviso.className = "aviso-trabajo";
+  aviso.innerHTML = "Este es <b>tu video</b>, analizado en tu computadora. Dibuja tus zonas, mira los Resultados y " +
+    "exporta a Excel. <b>Si recargas o cierras la página, se pierde</b> (tendrías que analizarlo otra vez).";
+  $("t-pie").after(aviso);
+  cambiarPestana("monitoreo");
+  toast(`¡Listo! Tu video se analizó: ${tablero?.camiones?.length ?? "?"} camiones. Presiona Iniciar para verlo.`, 7000);
+}
+
 function iniciarVideo(demo) {
   E.demo = demo;
   E.georef = Georreferencia.desdeDict(demo.calibracion);
@@ -206,7 +232,8 @@ function iniciarVideo(demo) {
   video.src = E.base + demo.archivo_video;
   video.addEventListener("loadeddata", () => {
     $("mensaje-video").hidden = true;
-    estado("Demostración lista. Presiona Iniciar para ver el análisis.", C.ok);
+    estado(E.local ? "Tu video está listo. Presiona Iniciar para ver el análisis." :
+           "Demostración lista. Presiona Iniciar para ver el análisis.", C.ok);
     vistaPrevia();
   }, { once: true });
   video.addEventListener("error", () => {
@@ -1002,7 +1029,14 @@ function pestanaVideos(subir) {
 }
 $("t-demos").addEventListener("click", () => pestanaVideos(false));
 $("t-subir").addEventListener("click", () => pestanaVideos(true));
-iniciarSubida();
+iniciarSubida({
+  revisarEquipo,
+  analizarLocal: (archivo, opciones) => {
+    $("dlg-videos").close();
+    cambiarPestana("vivo");
+    analizarArchivo(archivo, opciones);
+  },
+});
 
 $("b-abrir").addEventListener("click", () => {
   const lista = $("lista-videos");
@@ -1343,13 +1377,13 @@ async function exportarExcel(desdeResultados = false) {
   const hayDirecto = E.iniciado && E.vivo < duracion() - 0.5;
   const corte = desdeResultados ? corteResultados() : (hayDirecto ? "directo" : "todo");
   const hasta = corte === "directo" && hayDirecto ? E.vivo : null;
-  if (!E.cambiado && hasta == null) {
+  if (!E.cambiado && hasta == null && !E.local) {
     try { await descargarOriginal(); } catch { toast("No se pudo descargar el Excel. Inténtalo de nuevo."); }
     return;
   }
   E.generandoExcel = true;
   textoBotonesExcel("Preparando…", true);
-  toast(`Preparando tu Excel ${E.cambiado ? "con tus zonas y límites" : `hasta el segundo ${horaCorta(hasta)}`}. ` +
+  toast(`Preparando tu Excel${E.cambiado ? " con tus zonas y límites" : hasta != null ? ` hasta el segundo ${horaCorta(hasta)}` : ""}. ` +
         "La primera vez tarda unos segundos.", 8000);
   try {
     const tablero = await cargarTablero(E.base);
@@ -1357,14 +1391,15 @@ async function exportarExcel(desdeResultados = false) {
                                      limiteGeneral: E.limiteGeneral, hasta, georef: E.georef });
     const blob = await generarExcel(entrada, (paso) => estado(paso, C.acento));
     const sufijo = hasta == null ? "" : `_hasta_${horaCorta(hasta).replace(/:/g, "-")}`;
-    const base = E.remoto ? (E.demo.video || "mi_video").replace(/\.[^.]+$/, "") : E.demo.nombre;
+    const base = E.remoto || E.local ? (E.demo.video || "mi_video").replace(/\.[^.]+$/, "") : E.demo.nombre;
     descargarBlob(`reporte_${base}${E.cambiado ? "_mis_ajustes" : ""}${sufijo}.xlsx`, blob);
     estado(`Excel listo: ${hasta == null ? "todo el video" : `hasta el segundo ${horaCorta(hasta)}`}` +
            `${E.cambiado ? ", con tus zonas, límites y calibración" : ""}.`, C.ok);
     toast("Tu Excel se descargó. Búscalo en tu carpeta de Descargas.", 5000);
   } catch (error) {
     console.error(error);
-    if (await confirmar("No se pudo armar tu Excel",
+    if (E.local) toast("Tu navegador no pudo preparar el Excel. Inténtalo de nuevo.", 6000);
+    else if (await confirmar("No se pudo armar tu Excel",
         "Tu navegador no pudo preparar el Excel con tus datos (puede faltar conexión o memoria). " +
         "¿Quieres descargar el Excel original del análisis (sin tus zonas)?", "Descargar original", "Cancelar")) {
       descargarOriginal();
@@ -1663,7 +1698,12 @@ document.addEventListener("webkitfullscreenchange", alCambiarPantalla);
 $("tab-monitoreo").addEventListener("click", () => cambiarPestana("monitoreo"));
 $("tab-resultados").addEventListener("click", () => cambiarPestana("resultados"));
 $("tab-vivo").addEventListener("click", () => cambiarPestana("vivo"));
-iniciarVivo();
+iniciarVivo({ alTerminarArchivo: abrirAnalisisLocal });
+if (new URLSearchParams(location.search).has("prueba")) window.__app = E;          // pruebas automaticas
+// Tu video analizado en esta computadora vive solo en esta pestaña: se avisa antes de cerrarla o recargarla.
+window.addEventListener("beforeunload", (e) => {
+  if (E.local || analizandoArchivo()) { e.preventDefault(); e.returnValue = ""; }
+});
 $("tab-monitoreo").addEventListener("keydown", (e) => { if (e.key === "ArrowRight") { $("tab-resultados").focus(); cambiarPestana("resultados"); } });
 $("tab-resultados").addEventListener("keydown", (e) => { if (e.key === "ArrowLeft") { $("tab-monitoreo").focus(); cambiarPestana("monitoreo"); } });
 document.querySelectorAll("#seg-corte button").forEach((b) => b.addEventListener("click", () => elegirCorte(b.dataset.corte)));

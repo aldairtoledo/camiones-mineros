@@ -1,6 +1,8 @@
-// "Analiza tu propio video": sube el video al servidor (Modal), muestra el avance y,
-// al terminar, lo abre en la misma pagina (Monitoreo y Resultados) con ?trabajo=<id>.
-// El video y sus resultados se borran solos en el servidor a las 24 horas.
+// "Analizar mi video", con dos opciones:
+//  - En mi computadora: la pagina lo analiza con la tarjeta grafica del visitante (vivo/vivo.js) y
+//    al terminar lo abre en Monitoreo. No se sube nada.
+//  - En la nube: sube el video al servidor (Modal), muestra el avance y, al terminar, lo abre en la
+//    misma pagina (Monitoreo y Resultados) con ?trabajo=<id>. Se borra solo a las 24 horas.
 import { SERVIDOR_ANALISIS } from "./config.js";
 
 const $ = (id) => document.getElementById(id);
@@ -26,14 +28,68 @@ export async function estadoTrabajo(id) {
 }
 
 let limites = null, sondeo = null;
+const D = { servidorOk: false, equipo: null, revisando: null, modoTocado: false, elegido: false, opciones: {} };
 
-/** Prepara la pestaña "Analizar mi video" del dialogo (una vez). */
-export function iniciarSubida() {
+/** Opcion elegida: "local" (en mi computadora) o "nube". */
+const donde = () => document.querySelector('input[name="donde"]:checked')?.value || "nube";
+
+function actualizarDonde() {
+  const local = donde() === "local";
+  document.querySelectorAll("#form-subir .solo-nube").forEach((el) => { el.hidden = local; });
+  $("b-subir").textContent = local ? "Analizar en mi computadora" : "Subir y analizar";
+  $("b-subir").disabled = local ? !(D.equipo && D.equipo.webgpu) : !D.servidorOk;
+  if (!D.modoTocado) $("f-modo").value = local ? "Precision" : "Equilibrado";
+  $("f-error").hidden = true;
+}
+
+function estadoServidor(clase, texto) {
+  const nota = $("srv-estado");
+  nota.classList.remove("encendido", "apagado");
+  if (clase) nota.classList.add(clase);
+  nota.textContent = texto;
+}
+
+/** Revisa (una vez) si esta computadora puede analizar el video y recomienda una opcion. */
+async function revisarComputadora() {
+  if (!D.revisando) D.revisando = (D.opciones.revisarEquipo ? D.opciones.revisarEquipo() : Promise.resolve(null));
+  const eq = (D.equipo = await D.revisando) || { webgpu: false, basica: true };
+  const nota = $("od-equipo"), radio = document.querySelector('input[name="donde"][value="local"]');
+  nota.classList.remove("bien", "basica", "no");
+  if (!eq.webgpu) {
+    nota.classList.add("no");
+    nota.textContent = "Este navegador no puede usar la tarjeta gráfica (pasa en celulares y navegadores antiguos). Usa Chrome o Edge en una computadora.";
+    radio.disabled = true;
+  } else if (eq.basica) {
+    nota.classList.add("basica");
+    nota.textContent = `Tarjeta gráfica básica${eq.tarjeta ? ` (${eq.tarjeta})` : ""}: funciona, pero puede ir lento.`;
+  } else {
+    nota.classList.add("bien");
+    nota.textContent = `Tu computadora tiene tarjeta gráfica${eq.tarjeta ? ` (${eq.tarjeta})` : ""}.`;
+  }
+  const recomendada = eq.webgpu && !eq.basica ? "local" : "nube";
+  $("od-rec-local").hidden = recomendada !== "local";
+  $("od-rec-nube").hidden = recomendada !== "nube";
+  if (!D.elegido) document.querySelector(`input[name="donde"][value="${recomendada}"]`).checked = true;
+  actualizarDonde();
+}
+
+/**
+ * Prepara la pestaña "Analizar mi video" del dialogo (una vez).
+ * opciones.analizarLocal(archivo, { modo, largo }) analiza en esta computadora;
+ * opciones.revisarEquipo() dice si hay tarjeta grafica (ver vivo.js).
+ */
+export function iniciarSubida(opciones = {}) {
+  D.opciones = opciones;
+  document.querySelectorAll('input[name="donde"]').forEach((r) => r.addEventListener("change", () => {
+    D.elegido = true;
+    actualizarDonde();
+  }));
+  $("f-modo").addEventListener("change", () => { D.modoTocado = true; });
   $("form-subir").addEventListener("submit", (e) => { e.preventDefault(); subir(); });
   $("f-video").addEventListener("change", () => {
     const f = $("f-video").files[0];
     $("f-video-info").textContent = f ? `${f.name} · ${(f.size / 1e6).toFixed(1)} MB` : "";
-    if (f && limites && f.size > limites.max_mb * 1024 * 1024) {
+    if (f && limites && donde() === "nube" && f.size > limites.max_mb * 1024 * 1024) {
       $("f-video-info").textContent += ` — pesa más de ${limites.max_mb} MB`;
     }
   });
@@ -48,17 +104,18 @@ export function iniciarSubida() {
 
 /** Al abrir la pestaña: comprueba el servidor y retoma un analisis en curso. */
 export async function alAbrirSubida() {
-  const nota = $("srv-estado");
+  revisarComputadora();
   if (!SERVIDOR_ANALISIS) {
-    nota.className = "srv-estado apagado";
-    nota.textContent = "El análisis de videos propios todavía no está disponible en esta página.";
-    $("b-subir").disabled = true;
+    D.servidorOk = false;
+    estadoServidor("apagado", "El análisis en la nube todavía no está disponible en esta página.");
+    actualizarDonde();
     return;
   }
   const pendiente = leer(CLAVE_TRABAJO);
   if (pendiente && !sondeo) seguir(pendiente);
-  nota.className = "srv-estado";
-  nota.textContent = "Comprobando el servidor…";
+  estadoServidor("", "Comprobando el servidor…");
+  D.servidorOk = false;
+  actualizarDonde();
   try {
     const r = await fetch(`${SERVIDOR_ANALISIS}/estado`, { cache: "no-store" });
     if (!r.ok) throw new Error();
@@ -66,23 +123,17 @@ export async function alAbrirSubida() {
     $("t-limites").textContent = `Hasta ${limites.max_minutos} minutos y ${limites.max_mb} MB. ` +
       `Se borra a las ${limites.horas_guardado} horas.`;
     if (!limites.codigo_configurado) {
-      nota.className = "srv-estado apagado";
-      nota.textContent = "El servidor está encendido, pero aún no tiene un código de acceso configurado.";
-      $("b-subir").disabled = true;
+      estadoServidor("apagado", "El servidor está encendido, pero aún no tiene un código de acceso configurado.");
     } else if (limites.disponibles_hoy <= 0) {
-      nota.className = "srv-estado apagado";
-      nota.textContent = "Ya se alcanzó el máximo de análisis de hoy. Vuelve a intentarlo mañana.";
-      $("b-subir").disabled = true;
+      estadoServidor("apagado", "Ya se alcanzó el máximo de análisis de hoy en la nube. Vuelve a intentarlo mañana.");
     } else {
-      nota.className = "srv-estado encendido";
-      nota.textContent = `Servidor disponible (en la nube) · quedan ${limites.disponibles_hoy} análisis hoy`;
-      $("b-subir").disabled = false;
+      D.servidorOk = true;
+      estadoServidor("encendido", `Servidor disponible · quedan ${limites.disponibles_hoy} análisis hoy`);
     }
   } catch {
-    nota.className = "srv-estado apagado";
-    nota.textContent = "No se pudo conectar con el servidor de análisis. Revisa tu internet o inténtalo más tarde.";
-    $("b-subir").disabled = true;
+    estadoServidor("apagado", "No se pudo conectar con el servidor de análisis. Revisa tu internet o inténtalo más tarde.");
   }
+  actualizarDonde();
 }
 
 function mostrar(parte) {
@@ -109,6 +160,11 @@ function subir() {
   const archivo = $("f-video").files[0];
   const codigo = $("f-codigo").value.trim();
   if (!archivo) return pintarError("Elige un video primero.", true);
+  if (donde() === "local") {
+    $("f-error").hidden = true;
+    D.opciones.analizarLocal?.(archivo, { modo: $("f-modo").value, largo: $("f-largo").value || "15" });
+    return;
+  }
   if (!codigo) return pintarError("Escribe el código de acceso.", true);
   if (limites && archivo.size > limites.max_mb * 1024 * 1024) {
     return pintarError(`El video pesa ${(archivo.size / 1e6).toFixed(0)} MB; el máximo es ${limites.max_mb} MB.`, true);
