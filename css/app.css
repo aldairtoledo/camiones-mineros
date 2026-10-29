@@ -418,6 +418,11 @@ select { height: 34px; padding: 0 8px; border: 1px solid var(--borde); border-ra
 .od-estado.basica::before { content: "● "; color: var(--acento); }
 .od-estado.no::before { content: "● "; color: var(--error); }
 .form-subir .solo-nube[hidden] { display: none; }
+.abrir-guardado { border-top: 1px solid var(--borde); padding-top: 10px; }
+.abrir-guardado summary { cursor: pointer; font-size: 13px; color: var(--suave); }
+.abrir-guardado summary b { color: var(--texto); }
+.abrir-guardado[open] { display: grid; gap: 10px; }
+.abrir-guardado .boton { width: 100%; }
 .aviso-trabajo { margin: 8px 0 0; padding: 8px 10px; border-radius: 8px; background: #1C2738; color: var(--texto); font-size: 12.5px; line-height: 1.45; }
 .aviso-trabajo button { margin-top: 6px; }
 
