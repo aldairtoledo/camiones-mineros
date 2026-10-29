@@ -318,6 +318,10 @@ export class Flota {
       bono: 0.15, prediccionMax: 60, suavizado: 0.6, antesDeForzar: 3, velocidadQuieto: 0.4,
       paraAnclar: 15, radioAnclado: 20, liberarAncla: 150, contencionFusion: 0.6, maxOculto: 150,
       margenPerturbacion: 30, postPerturbacion: f(0.7), iouMinProtegido: 0.4, confirmarSalida: 8,
+      // Distancia al borde (en largos de camion) para dar por "salido" a un camion perdido que iba
+      // hacia afuera. 0.6 = app de escritorio. En vivo (pantalla compartida, imagen mas chica) los
+      // camiones dejan de detectarse un poco antes de tocar el borde, por eso alli se usa mas.
+      factorSalida: 0.6, salidaSinDireccion: false,
       ancho: 800, alto: 600, confirmarFuera: f(1.0), olvidar: f(60.0), confirmarEntrada: f(0.5),
     }, o);
     this.salidas = []; this.tentativos = []; this.primerCuadro = null;
@@ -337,9 +341,12 @@ export class Flota {
     return x < m || y < m || x + w > this.ancho - m || y + h > this.alto - m;
   }
   saliendo(r, n) {
-    if (!r.caja || this.anclado(r, n) || !this.enBorde(r.caja)) return false;
+    if (!r.caja || this.anclado(r, n) || !this.enBorde(r.caja, this.factorSalida)) return false;
     const [x, y, w, h] = r.caja;
     if (x <= 2 || y <= 2 || x + w >= this.ancho - 2 || y + h >= this.alto - 2) return true;
+    // En vivo los cuadros llegan con saltos y la direccion medida al perderlo no es confiable:
+    // perdido mas de 1 s junto al borde (y sin estar en la cola) = salio de la imagen.
+    if (this.salidaSinDireccion) return true;
     const [vx, vy] = r.vel, cx = x + w / 2, cy = y + h / 2;
     const opciones = [[[-1, 0], cx], [[1, 0], this.ancho - cx], [[0, -1], cy], [[0, 1], this.alto - cy]];
     let mejor = opciones[0];
@@ -481,6 +488,7 @@ export class Flota {
     // 3) detecciones sueltas
     const usados = new Set([...asig.values(), ...ocultos, ...protegidos]);
     const sueltas = [], conCandidata = new Set();
+    const vistosEnSuSitio = new Set(asig.values());          // ya tienen su propia deteccion (paso 2)
     for (const i of validas) {
       if (asig.has(i)) continue;
       const caja = obs[i][1];
@@ -491,7 +499,8 @@ export class Flota {
         const [px, py] = centro(reg.get(p).congelada), d = Math.hypot(cx - px, cy - py);
         if (d <= dist) { cercano = p; dist = d; }
       }
-      if (cercano !== null && !conCandidata.has(cercano)) {
+      // Un camion protegido que sigue viendose en su sitio no esta saliendo: la deteccion cercana es otro camion.
+      if (cercano !== null && !conCandidata.has(cercano) && !vistosEnSuSitio.has(cercano)) {
         conCandidata.add(cercano);
         if (this.confirmaSalida(cercano, caja, pred, moviles)) {
           Object.assign(reg.get(cercano), { perturbadoHasta: -1, quieto: 0, salidaFrames: 0, salidaCaja: null });
