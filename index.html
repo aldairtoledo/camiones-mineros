@@ -29,6 +29,7 @@
     <section class="seccion">
       <h2>VIDEO</h2>
       <button class="boton" id="b-abrir">Abrir video</button>
+      <button class="boton" id="b-guardar-analisis" hidden title="Descarga tu análisis para abrirlo otra vez sin analizar">⤓&nbsp; Guardar análisis</button>
       <button class="boton" id="b-reiniciar">↺&nbsp; Reiniciar</button>
     </section>
 
@@ -343,6 +344,21 @@
       <button class="boton primario" id="b-subir" type="submit">Analizar en mi computadora</button>
       <p class="suave nota-subir" id="nota-subir">Con cualquiera de las dos opciones se usa el mismo modelo y el mismo motor del laboratorio.
         Al terminar, tu video se abre en Monitoreo: ahí dibujas tus zonas, ves los Resultados y exportas a Excel.</p>
+          <details class="abrir-guardado">
+        <summary>¿Ya lo analizaste y guardaste? <b>Abrir un análisis guardado</b></summary>
+        <label class="campo">
+          <span class="etq">Archivo del análisis</span>
+          <input type="file" id="f-guardado" accept=".gz,.json,application/gzip,application/json">
+          <small class="suave">El que descargaste con Guardar análisis (analisis_….json.gz).</small>
+        </label>
+        <label class="campo">
+          <span class="etq">Tu video</span>
+          <input type="file" id="f-guardado-video" accept="video/*,.mp4,.mov,.m4v,.avi,.mkv,.webm">
+          <small class="suave">El mismo video que analizaste.</small>
+        </label>
+        <p class="f-error" id="f-guardado-error" role="alert" hidden></p>
+        <button class="boton" id="b-abrir-guardado" type="button">Abrir análisis guardado</button>
+      </details>
     </form>
     <div class="subida-progreso" id="subida-progreso" hidden aria-live="polite">
       <h4 id="prog-titulo"></h4>
