@@ -1,3 +1,4 @@
-Pyodide 0.27.7 (https://pyodide.org) - Mozilla Public License 2.0.
+Pyodide 0.29.5 (https://pyodide.org) - Mozilla Public License 2.0.
+numpy 2.2.5 (compilado por Pyodide 0.29.5) - licencia BSD.
 openpyxl 3.1.5 y et_xmlfile 2.0.0 - licencia MIT.
-Se incluyen sin cambios para generar el Excel dentro del navegador.
+Se incluyen sin cambios para generar el Excel y analizar videos dentro del navegador.
