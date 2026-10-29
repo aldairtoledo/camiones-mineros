@@ -17,6 +17,9 @@ const V = {
   ort: null, det: null, motor: null, cargando: null, proveedor: "", tarjeta: "",
   activo: false, flujo: null, url: null, fuente: "", ultimaFila: null, nUltima: 0,
   tiempos: [], dibujando: false, visible: false,
+  pasos: false,        // video de la PC: se analiza cuadro por cuadro (como la app de escritorio)
+  recorte: null,       // pantalla o camara: parte de la imagen donde esta el video (sin barras negras)
+  velocidad: 1,
 };
 const video = $("v-video"), lienzo = $("v-lienzo"), ctx = lienzo.getContext("2d");
 
@@ -83,16 +86,28 @@ async function empezar(tipo, obtener) {
       video.src = fuente.url;
       video.loop = false;
     }
-    await video.play();
-    V.motor = new MotorVivo({ fps: FPS, salto: 1 });
-    V.ultimaFila = null; V.tiempos = [];
+    V.pasos = !fuente.flujo && new URLSearchParams(location.search).get("fuente") !== "vivo";
+    V.recorte = null;
+    if (V.pasos) {
+      await new Promise((ok, mal) => {
+        video.addEventListener("loadeddata", ok, { once: true });
+        video.addEventListener("error", () => mal(new Error("Tu navegador no pudo abrir ese video. Prueba con un .mp4 (H.264).")), { once: true });
+      });
+      video.pause();
+    } else {
+      await video.play();
+    }
+    // Con la tarjeta grafica se analizan todos los cuadros (Precision); con el procesador, 2 de cada 3 (Rapido).
+    const saltoPedido = parseFloat(new URLSearchParams(location.search).get("salto"));
+    V.motor = new MotorVivo({ fps: FPS, salto: saltoPedido || (V.proveedor === "webgpu" ? 1 : 1.5) });
+    V.ultimaFila = null; V.tiempos = []; V.cuadros = [];
     V.activo = true;
     mensaje(null);
     $("v-insignia").hidden = false;
     $("v-ayuda").textContent = tipo === "pantalla"
-      ? "Analizando lo que compartiste. Puedes volver a la ventana del simulador: el análisis sigue aquí."
+      ? "Analizando lo que compartiste (las barras negras y los bordes de la ventana se quitan solos). Consejo: comparte solo la ventana del simulador y agrándala; mientras más grande se vean los camiones, mejor."
       : "Analizando… Los números de los camiones se mantienen aunque se crucen o se detengan en la cola.";
-    analizar();
+    (V.pasos ? analizarVideo : analizar)();
     if (!V.dibujando) { V.dibujando = true; requestAnimationFrame(dibujar); }
   } catch (e) {
     detener(false);
@@ -138,17 +153,103 @@ async function analizar() {
     const n = Math.floor(video.currentTime * FPS) + 1;          // cuadro que se ve ahora
     if (n <= motor.contador) { await siguienteCuadro(); continue; }
     const t0 = performance.now();
+    if (t0 - (V.tRecorte || 0) > 2000) { V.tRecorte = t0; buscarRecorte(); }
     // Igual que la app: el cuadro se lleva a 800 x 600 y se analiza; las cajas salen en ese cuadro.
-    const dets = await V.det.detectar(video, ANCHO_TRABAJO, ALTO_TRABAJO);
+    const dets = await V.det.detectar(video, ANCHO_TRABAJO, ALTO_TRABAJO, 0.25, 0.7, V.recorte);
     if (!V.activo || V.motor !== motor) break;
     while (motor.contador < n - 1) motor.paso(null);            // cuadros que no se alcanzaron a analizar
     V.ultimaFila = motor.paso(dets);
+    V.cuadros.push(V.ultimaFila);
     V.nUltima = n;
-    V.tiempos.push(performance.now() - t0);
-    if (V.tiempos.length > 30) V.tiempos.shift();
-    actualizarPanel();
+    medir(t0);
     await esperar(0);
   }
+}
+
+function medir(t0) {
+  V.tiempos.push(performance.now() - t0);
+  if (V.tiempos.length > 30) V.tiempos.shift();
+  actualizarPanel();
+}
+
+/**
+ * Video de la PC: se analiza cuadro por cuadro, en orden y sin saltarse ninguno, igual que la app
+ * de escritorio. El video avanza a la velocidad que permite la computadora (si es lenta, en camara
+ * lenta), y asi los numeros de los camiones salen iguales a los de la app.
+ */
+async function analizarVideo() {
+  const motor = V.motor, total = Math.floor(video.duration * FPS + 1e-6);
+  const t0 = performance.now();
+  for (let n = motor.contador + 1; n <= total; n++) {
+    if (!V.activo || V.motor !== motor) return;
+    const ti = performance.now();
+    let dets = null;
+    if (motor.debeInferir(n)) {
+      await irA((n - 0.5) / FPS);
+      if (!V.activo || V.motor !== motor) return;
+      dets = await V.det.detectar(video, ANCHO_TRABAJO, ALTO_TRABAJO);
+    }
+    V.ultimaFila = motor.paso(dets);
+    V.cuadros.push(V.ultimaFila);
+    V.nUltima = n;
+    if (dets) {
+      medir(ti);
+      V.velocidad = (n / FPS) / ((performance.now() - t0) / 1000);
+      await esperar(0);
+    }
+  }
+  if (V.activo && V.motor === motor) {
+    const seguidos = motor.flota.registros.size;
+    detener(false);
+    mensaje(`Video terminado: ${seguidos} camiones seguidos en ${mmss(motor.tiempo())}. Elige otra fuente para analizar otra vez.`);
+  }
+}
+
+function irA(t) {
+  return new Promise((ok) => {
+    if (Math.abs(video.currentTime - t) < 1e-4 && video.readyState >= 2) { ok(); return; }
+    const listo = () => { clearTimeout(tope); ok(); };
+    const tope = setTimeout(() => { video.removeEventListener("seeked", listo); ok(); }, 2000);
+    video.addEventListener("seeked", listo, { once: true });
+    video.currentTime = t;
+  });
+}
+
+/**
+ * Pantalla o camara: busca la parte de la imagen donde esta el video del simulador (quita las barras
+ * negras, la barra de titulo y los bordes de la ventana) para que los camiones no se vean pequenos.
+ */
+const muestra = document.createElement("canvas");
+function buscarRecorte() {
+  const vw = video.videoWidth, vh = video.videoHeight;
+  if (!vw || !vh) return;
+  const W = 192, H = Math.max(8, Math.round(W * vh / vw));
+  muestra.width = W; muestra.height = H;
+  const c = muestra.getContext("2d", { willReadFrequently: true });
+  c.drawImage(video, 0, 0, W, H);
+  const d = c.getImageData(0, 0, W, H).data;
+  const claro = new Uint8Array(W * H);
+  for (let i = 0, j = 0; i < W * H; i++, j += 4) claro[i] = 0.299 * d[j] + 0.587 * d[j + 1] + 0.114 * d[j + 2] > 45 ? 1 : 0;
+  // la franja mas larga de filas (o columnas) donde la mayoria de los pixeles tiene imagen
+  const franja = (cuenta, n, largo) => {
+    let mejor = [0, -1], inicio = -1;
+    for (let k = 0; k <= n; k++) {
+      const ok = k < n && cuenta(k) / largo > 0.55;
+      if (ok && inicio < 0) inicio = k;
+      if (!ok && inicio >= 0) { if (k - 1 - inicio > mejor[1] - mejor[0]) mejor = [inicio, k - 1]; inicio = -1; }
+    }
+    return mejor;
+  };
+  const [y0, y1] = franja((y) => { let s = 0; for (let x = 0; x < W; x++) s += claro[y * W + x]; return s; }, H, W);
+  if (y1 < y0) { V.recorte = null; return; }
+  const [x0, x1] = franja((x) => { let s = 0; for (let y = y0; y <= y1; y++) s += claro[y * W + x]; return s; }, W, y1 - y0 + 1);
+  if (x1 < x0) { V.recorte = null; return; }
+  const fx = vw / W, fy = vh / H;
+  const nuevo = [Math.round(x0 * fx), Math.round(y0 * fy), Math.round((x1 - x0 + 1) * fx), Math.round((y1 - y0 + 1) * fy)];
+  // muy pequeno o casi toda la imagen: se analiza completa
+  if (nuevo[2] * nuevo[3] < 0.15 * vw * vh || (nuevo[2] > 0.97 * vw && nuevo[3] > 0.97 * vh)) { V.recorte = null; return; }
+  const r = V.recorte;
+  if (!r || nuevo.some((v, k) => Math.abs(v - r[k]) > 0.02 * (k % 2 ? vh : vw))) V.recorte = nuevo;
 }
 const esperar = (ms) => new Promise((r) => setTimeout(r, ms));
 const siguienteCuadro = () => new Promise((r) => (video.requestVideoFrameCallback ? video.requestVideoFrameCallback(() => r()) : setTimeout(r, 16)));
@@ -160,6 +261,9 @@ function actualizarPanel() {
   $("v-tiempo").textContent = mmss(m.tiempo());
   const fps = 1000 / prom;
   $("v-fps").textContent = `${fps.toFixed(fps < 10 ? 1 : 0)} veces`;
+  // Con un video se analiza cuadro por cuadro: si la PC no alcanza, el video va en camara lenta.
+  $("v-fila-vel").hidden = !V.pasos;
+  if (V.pasos) $("v-vel").textContent = V.velocidad >= 0.95 ? "normal" : `×${V.velocidad.toFixed(V.velocidad < 0.1 ? 2 : 1)} (más lento)`;
   const c = $("v-consejo");
   const lento = V.tiempos.length >= 15 && fps < 8;
   c.hidden = !lento;
@@ -173,15 +277,16 @@ function actualizarPanel() {
 
 // ---------------------------------------------------------------- dibujo (fluido, a la velocidad de la pantalla)
 function rectVideo(W, H) {
-  const vw = video.videoWidth || 16, vh = video.videoHeight || 9, e = Math.min(W / vw, H / vh);
-  return { x: (W - vw * e) / 2, y: (H - vh * e) / 2, w: vw * e, h: vh * e };
+  const rc = V.recorte || [0, 0, video.videoWidth || 16, video.videoHeight || 9];
+  const e = Math.min(W / rc[2], H / rc[3]);
+  return { x: (W - rc[2] * e) / 2, y: (H - rc[3] * e) / 2, w: rc[2] * e, h: rc[3] * e, rc };
 }
 
 /** Cajas que se ven ahora: las del ultimo analisis, adelantadas con la velocidad de cada camion. */
 function camionesAhora() {
   const m = V.motor, fila = V.ultimaFila;
   if (!m || !fila) return [];
-  const nAhora = Math.max(V.nUltima, video.currentTime * FPS + 1);
+  const nAhora = V.pasos ? V.nUltima : Math.max(V.nUltima, video.currentTime * FPS + 1);
   const adelanto = nAhora - V.nUltima;
   return fila[3].map(([pid, x, y, w, h, , , poli]) => {
     const r = m.flota.registros.get(pid);
@@ -203,7 +308,7 @@ function dibujar() {
   ctx.clearRect(0, 0, W, H);
   if (!V.activo || !video.videoWidth) return;
   const r = rectVideo(W, H);
-  ctx.drawImage(video, r.x, r.y, r.w, r.h);
+  ctx.drawImage(video, r.rc[0], r.rc[1], r.rc[2], r.rc[3], r.x, r.y, r.w, r.h);
   const ex = r.w / ANCHO_TRABAJO, ey = r.h / ALTO_TRABAJO;
   const aC = (x, y) => [r.x + x * ex, r.y + y * ey];
   const cam = camionesAhora().map((c) => {
@@ -275,5 +380,6 @@ export function vivoVisible(si) {
 
 /** Para las pruebas automaticas: empezar con una URL de video. */
 export function vivoProbar(url) { return empezar("archivo", async () => ({ url })); }
+if (new URLSearchParams(location.search).has("prueba")) window.__vivo = () => estadoVivo();
 export const estadoVivo = () => ({ activo: V.activo, proveedor: V.proveedor, fila: V.ultimaFila, contador: V.motor?.contador,
-  seguidos: V.motor?.flota.registros.size, tiempos: [...V.tiempos] });
+  seguidos: V.motor?.flota.registros.size, tiempos: [...V.tiempos], cuadros: V.cuadros, recorte: V.recorte, velocidad: V.velocidad });

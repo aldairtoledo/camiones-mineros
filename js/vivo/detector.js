@@ -1,4 +1,5 @@
 // Detector YOLO OBB en el navegador (misma logica que Ultralytics: letterbox 640, conf 0.25, NMS rotado probiou 0.7).
+// La imagen se estira a W x H (800 x 600, como hace motor.py) y luego se encuadra en 640 x 640.
 export class Detector {
   constructor(ort, sesion) {
     this.ort = ort; this.s = sesion;
@@ -10,13 +11,15 @@ export class Detector {
     const s = await ort.InferenceSession.create(url, { executionProviders: proveedores, graphOptimizationLevel: "all" });
     return new Detector(ort, s);
   }
-  async detectar(fuente, W, H, conf = 0.25, iou = 0.7) {
+  /** recorte: [sx, sy, sw, sh] de la fuente que se analiza (por defecto, toda). */
+  async detectar(fuente, W, H, conf = 0.25, iou = 0.7, recorte = null) {
     const t0 = performance.now();
     const r = Math.min(640 / W, 640 / H), nw = Math.round(W * r), nh = Math.round(H * r);
     const l = Math.floor((640 - nw) / 2), t = Math.floor((640 - nh) / 2);
     const c = this.c;
     c.fillStyle = "rgb(114,114,114)"; c.fillRect(0, 0, 640, 640);
-    c.drawImage(fuente, l, t, nw, nh);
+    if (recorte) c.drawImage(fuente, recorte[0], recorte[1], recorte[2], recorte[3], l, t, nw, nh);
+    else c.drawImage(fuente, l, t, nw, nh);
     const px = c.getImageData(0, 0, 640, 640).data, d = this.datos, N = 640 * 640;
     for (let i = 0, j = 0; i < N; i++, j += 4) { d[i] = px[j] / 255; d[i + N] = px[j + 1] / 255; d[i + 2 * N] = px[j + 2] / 255; }
     const ent = new this.ort.Tensor("float32", d, [1, 3, 640, 640]);
