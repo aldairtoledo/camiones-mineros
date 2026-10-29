@@ -395,6 +395,29 @@ select { height: 34px; padding: 0 8px; border: 1px solid var(--borde); border-ra
 .barra-progreso span { display: block; height: 100%; width: 0; background: var(--info, #4DA3FF); border-radius: 6px; transition: width .4s; }
 .barra-progreso.ok span { background: #4CD964; }
 .dlg-botones.izq { justify-content: flex-start; }
+/* ¿Donde se analiza? (en mi computadora / en la nube) */
+.campo.donde { border: 0; margin: 0; padding: 0; min-width: 0; gap: 8px; }
+.campo.donde legend { padding: 0; margin-bottom: 7px; }
+.opcion-donde { display: flex; gap: 10px; align-items: flex-start; padding: 11px 12px; border: 1px solid var(--borde);
+  border-radius: 10px; background: var(--tarjeta); cursor: pointer; transition: border-color .15s, background .15s; }
+.opcion-donde + .opcion-donde { margin-top: 8px; }
+.opcion-donde input { margin: 3px 0 0; accent-color: var(--acento); width: 16px; height: 16px; flex: none; }
+.opcion-donde:has(input:checked) { border-color: var(--acento); background: #2A2618; }
+.opcion-donde:has(input:disabled) { opacity: .55; cursor: not-allowed; }
+.opcion-donde:hover:not(:has(input:disabled)) { border-color: #4A5260; }
+.od-cuerpo { display: grid; gap: 3px; min-width: 0; }
+.od-titulo { font-size: 14px; font-weight: 600; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.od-insignia { font-style: normal; font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 999px;
+  background: var(--acento); color: var(--texto-acento); }
+.od-texto { font-size: 12.5px; line-height: 1.45; color: var(--suave); }
+.od-estado { font-size: 12px; color: var(--suave); }
+.opcion-donde .srv-estado { margin: 2px 0 0; font-size: 12px; align-items: flex-start; gap: 6px; }
+.opcion-donde .srv-estado::before { width: 7px; height: 7px; margin-top: 5px; }
+.od-estado.bien { color: var(--texto); }
+.od-estado.bien::before { content: "● "; color: var(--ok); }
+.od-estado.basica::before { content: "● "; color: var(--acento); }
+.od-estado.no::before { content: "● "; color: var(--error); }
+.form-subir .solo-nube[hidden] { display: none; }
 .aviso-trabajo { margin: 8px 0 0; padding: 8px 10px; border-radius: 8px; background: #1C2738; color: var(--texto); font-size: 12.5px; line-height: 1.45; }
 .aviso-trabajo button { margin-top: 6px; }
 
@@ -496,3 +519,12 @@ select { height: 34px; padding: 0 8px; border: 1px solid var(--borde); border-ra
 .app.modo-vivo .titulo > * { display: none; }
 .app.modo-vivo .titulo::before { content: "Análisis en vivo"; display: block; font-size: 17px; font-weight: 600; }
 .app.modo-vivo .titulo::after { content: "Detección y seguimiento en tu propia computadora"; display: block; font-size: 12.5px; color: var(--suave); }
+.app.modo-vivo.vivo-archivo .titulo::before { content: "Analizando tu video"; }
+.app.modo-vivo.vivo-archivo .titulo::after { content: "En tu computadora, cuadro por cuadro · no se sube a ningún servidor"; }
+.vivo-avance { display: grid; gap: 8px; padding: 12px; border-radius: 10px; background: #2A2618; border: 1px solid var(--acento); }
+.vivo-avance[hidden] { display: none; }
+.app.vivo-archivo #v-pantalla, .app.vivo-archivo #v-camara, .app.vivo-archivo #v-nota { display: none; }
+.vivo-avance-cab { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.vivo-avance-cab strong { font-size: 24px; color: var(--acento); font-variant-numeric: tabular-nums; }
+.vivo-avance-cab span { font-size: 12.5px; color: var(--suave); }
+.vivo-avance .barra-progreso span { background: var(--acento); }
