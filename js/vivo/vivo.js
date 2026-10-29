@@ -1,13 +1,18 @@
-// Pestaña "En vivo": analiza en tiempo real la pantalla compartida, un video de la PC o la cámara,
-// con el mismo modelo (best_obb_v2.onnx) y el mismo seguimiento que la app de escritorio.
+// Pestaña "En vivo": analiza en tiempo real la pantalla compartida o la cámara, con el mismo
+// modelo (best_obb_v2.onnx) y el mismo seguimiento que la app de escritorio.
+// Tambien hace "Analizar mi video" -> "En mi computadora": el video se analiza cuadro por cuadro y
+// motor.py (con Pyodide, ver analisis_worker.js) arma los mismos resultados que exportar_demo.py.
 // Todo corre en la computadora del visitante (tarjeta grafica con WebGPU); no se sube nada.
 import { Detector } from "./detector.js";
-import { MotorVivo, ANCHO_TRABAJO, ALTO_TRABAJO } from "./motor_vivo.js";
+import { MotorVivo, ANCHO_TRABAJO, ALTO_TRABAJO, geometria } from "./motor_vivo.js";
 
 const ORT_VERSION = "1.30.0";
 const ORT_CDN = `https://cdn.jsdelivr.net/npm/onnxruntime-web@${ORT_VERSION}/dist/`;
 const MODELO = "datos/best_obb_v2.onnx";
-const FPS = 30;                                   // los cuadros se numeran como en un video de 30 cuadros/s
+const FPS = 30;                                   // pantalla y camara: cuadros numerados como en un video de 30 cuadros/s
+const MODOS = { Precision: ["Precisión", 1], Equilibrado: ["Equilibrado", 1.25], Rapido: ["Rápido", 1.5] };  // exportar_demo.MODOS
+const SEGUNDOS_ENTRE_MEDIDAS = 20;                // exportar_demo.SEGUNDOS_ENTRE_MEDIDAS
+const BRILLO_MINIMO_VISTA = 25;                   // motor.BRILLO_MINIMO_VISTA
 const COLOR_CAJA = "#00FFFF";
 
 const $ = (id) => document.getElementById(id);
@@ -17,7 +22,9 @@ const V = {
   ort: null, det: null, motor: null, cargando: null, proveedor: "", tarjeta: "",
   activo: false, flujo: null, url: null, fuente: "", ultimaFila: null, nUltima: 0,
   tiempos: [], dibujando: false, visible: false,
-  pasos: false,        // video de la PC: se analiza cuadro por cuadro (como la app de escritorio)
+  pasos: false,        // video grabado: se analiza cuadro por cuadro (como la app de escritorio)
+  local: null,         // "Analizar mi video" en esta computadora: { archivo, modo, skip, largo, proxima, ... }
+  fps: FPS, worker: null,
   recorte: null,       // pantalla o camara: parte de la imagen donde esta el video (sin barras negras)
   velocidad: 1,
 };
@@ -86,26 +93,33 @@ async function empezar(tipo, obtener) {
       video.src = fuente.url;
       video.loop = false;
     }
-    V.pasos = !fuente.flujo && new URLSearchParams(location.search).get("fuente") !== "vivo";
+    V.pasos = !fuente.flujo;
+    V.local = fuente.archivo ? { ...fuente, proxima: 0, inicio: performance.now() } : null;
+    V.fps = FPS;
     V.recorte = null;
+    botones(true);
+    actualizarPestana();
     if (V.pasos) {
       await new Promise((ok, mal) => {
         video.addEventListener("loadeddata", ok, { once: true });
         video.addEventListener("error", () => mal(new Error("Tu navegador no pudo abrir ese video. Prueba con un .mp4 (H.264).")), { once: true });
       });
       video.pause();
+      if (V.local && !(await prepararLocal())) return;
     } else {
       await video.play();
     }
     // Con la tarjeta grafica se analizan todos los cuadros (Precision); con el procesador, 2 de cada 3 (Rapido).
     const saltoPedido = parseFloat(new URLSearchParams(location.search).get("salto"));
-    V.motor = new MotorVivo({ fps: FPS, salto: saltoPedido || (V.proveedor === "webgpu" ? 1 : 1.5) });
+    V.motor = new MotorVivo({ fps: V.fps, salto: V.local ? V.local.skip : saltoPedido || (V.proveedor === "webgpu" ? 1 : 1.5),
+                              enVivo: !V.pasos });
     V.ultimaFila = null; V.tiempos = []; V.cuadros = [];
     V.activo = true;
     mensaje(null);
-    $("v-insignia").hidden = false;
+    $("v-insignia").hidden = !!V.local;
     $("v-ayuda").textContent = tipo === "pantalla"
       ? "Analizando lo que compartiste (las barras negras y los bordes de la ventana se quitan solos). Consejo: comparte solo la ventana del simulador y agrándala; mientras más grande se vean los camiones, mejor."
+      : V.local ? "Analizando tu video cuadro por cuadro, igual que la app de escritorio. Al terminar se abre en Monitoreo para que dibujes tus zonas y veas los Resultados."
       : "Analizando… Los números de los camiones se mantienen aunque se crucen o se detengan en la cola.";
     (V.pasos ? analizarVideo : analizar)();
     if (!V.dibujando) { V.dibujando = true; requestAnimationFrame(dibujar); }
@@ -115,9 +129,141 @@ async function empezar(tipo, obtener) {
   }
 }
 
+// ---------------------------------------------------------------- "Analizar mi video" en esta computadora
+const muestraBrillo = document.createElement("canvas");
+muestraBrillo.width = 160; muestraBrillo.height = 90;
+/** Brillo promedio del cuadro que se ve (como frame.mean() en motor.py). */
+function brillo() {
+  const c = muestraBrillo.getContext("2d", { willReadFrequently: true });
+  c.drawImage(video, 0, 0, 160, 90);
+  const d = c.getImageData(0, 0, 160, 90).data;
+  let s = 0;
+  for (let i = 0; i < d.length; i += 4) s += d[i] + d[i + 1] + d[i + 2];
+  return s / (d.length / 4 * 3);
+}
+const ESTANDAR = [24000 / 1001, 24, 25, 30000 / 1001, 30, 50, 60000 / 1001, 60];
+
+/**
+ * Antes de analizar, como Motor.abrir_video: busca el primer cuadro con imagen (algunos videos empiezan
+ * en negro) para medir los camiones y calibrar en metros, y averigua los cuadros por segundo del video.
+ * Despues prepara Python (motor.py) en segundo plano y vuelve el video al inicio.
+ */
+async function prepararLocal() {
+  const L = V.local;
+  mensaje("Revisando tu video…");
+  const copia = document.createElement("canvas");
+  copia.width = video.videoWidth; copia.height = video.videoHeight;
+  const guardar = () => copia.getContext("2d").drawImage(video, 0, 0);
+  const tiempos = [];
+  const siguiente = async () => {
+    const meta = await siguienteImagen();
+    if (meta) tiempos.push(meta.mediaTime);
+    return meta && V.local === L;
+  };
+  // misma busqueda que abrir_video (con 30 cuadros/s de referencia para los limites)
+  let vista = brillo(), primero = vista, n = 0;
+  guardar();
+  while (vista < BRILLO_MINIMO_VISTA && n < FPS * 10) {
+    if (!(await siguiente())) break;
+    vista = brillo(); n++;
+    if (vista >= BRILLO_MINIMO_VISTA) guardar();
+  }
+  if (V.local !== L) return false;
+  if (vista < BRILLO_MINIMO_VISTA) { vista = primero; await irA(0); guardar(); }
+  else {
+    for (let k = 0; k < FPS * 2; k++) {
+      if (!(await siguiente())) break;
+      const b = brillo();
+      if (b <= vista * 1.01) break;
+      vista = b; guardar();
+    }
+  }
+  while (tiempos.length < 12 && (await siguiente()));          // unos cuadros mas para medir los cuadros/s
+  if (V.local !== L) return false;
+  const pasos = tiempos.slice(1).map((t, i) => t - tiempos[i]).filter((d) => d > 0.002).sort((a, b) => a - b);
+  let fps = pasos.length ? 1 / pasos[Math.floor(pasos.length / 2)] : FPS;
+  const cerca = [...ESTANDAR].sort((a, b) => Math.abs(a - fps) - Math.abs(b - fps)).find((f) => Math.abs(f - fps) / f < 0.005);
+  V.fps = cerca || Math.round(fps * 100) / 100;
+  L.total = Math.max(1, Math.round(video.duration * V.fps));
+  // camiones del primer cuadro con imagen (para la calibracion automatica, como calibrar_automatico)
+  const dets = await V.det.detectar(copia, ANCHO_TRABAJO, ALTO_TRABAJO);
+  if (V.local !== L) return false;
+  const polisPrimer = dets.map(([x, y, w, h, a]) => geometria(x, y, w, h, a).poli.flat());
+  if (!V.worker) {
+    V.worker = new Worker(new URL("./analisis_worker.js", import.meta.url), { type: "module" });
+    V.worker.onmessage = alMensajeWorker;
+    V.worker.onerror = (e) => fallaLocal(e.message || "No se pudo preparar Python en tu navegador.");
+  }
+  L.listoPython = false; L.hechos = 0;
+  V.worker.postMessage({ tipo: "iniciar", nombre: L.archivo.name, ancho: video.videoWidth, alto: video.videoHeight,
+                         fps: V.fps, total: L.total, modo: L.nombreModo, skip: L.skip, largo: L.largo, polisPrimer });
+  await irA(0);
+  mensaje(null);
+  return V.local === L;
+}
+
+function alMensajeWorker(e) {
+  const m = e.data, L = V.local;
+  if (m.tipo === "error") return fallaLocal(m.texto);
+  if (!L) return;
+  if (m.tipo === "listo") { L.listoPython = true; L.calibracion = m.calibracion; }
+  else if (m.tipo === "avance") L.hechos = m.hechos;
+  else if (m.tipo === "resultado" && L.alTerminar) L.alTerminar(m.texto);
+}
+
+function fallaLocal(texto) {
+  console.error("Analisis en la computadora:", texto);
+  if (V.worker) { V.worker.terminate(); V.worker = null; }
+  if (!V.local) return;
+  detener(false);
+  mensaje("No se pudo terminar el análisis en tu computadora (" + String(texto).split("\n").filter(Boolean).pop() +
+          "). Prueba otra vez o usa Abrir video → Analizar mi video → En la nube.");
+}
+
+/** Despues de cada cuadro: lo que encontro ByteTrack va a motor.py (y, cada 20 s, los camiones para calibrar). */
+async function enviarCuadro(n, dets) {
+  const L = V.local;
+  let polis = null;
+  if (n / V.fps >= L.proxima) {
+    L.proxima = n / V.fps + SEGUNDOS_ENTRE_MEDIDAS;
+    const d = dets || await V.det.detectar(video, ANCHO_TRABAJO, ALTO_TRABAJO);
+    polis = d.map(([x, y, w, h, a]) => geometria(x, y, w, h, a).poli.flat());
+  }
+  V.worker.postMessage({ tipo: "paso", camiones: dets ? V.motor.ultimasPistas : null, polis });
+}
+
+/** Termina el analisis: motor.py arma demo.json y resultados.json y se abren en Monitoreo. */
+function terminarLocal() {
+  const L = V.local, motor = V.motor;
+  mensaje("Armando los resultados (tiempos, distancias, avisos)…");
+  L.alTerminar = (texto) => {
+    if (V.local !== L) return;
+    let datos;
+    try { datos = JSON.parse(texto); } catch { return fallaLocal("resultado ilegible"); }
+    const url = V.url;
+    V.url = null;                                   // el video ahora lo usa Monitoreo: no se borra
+    V.local = null;
+    detener(false);
+    mensaje(`Video terminado: ${motor.flota.registros.size} camiones seguidos. Se abrió en Monitoreo.`);
+    actualizarPestana();
+    datos.demo.dispositivo = V.proveedor === "webgpu" ? "tu computadora, con la tarjeta gráfica" : "tu computadora";
+    if (alTerminarArchivo) alTerminarArchivo({ ...datos, url, archivo: L.archivo });
+  };
+  V.worker.postMessage({ tipo: "terminar", dispositivo: "Tu computadora" });
+}
+
+/** La pestaña muestra el avance mientras se analiza un video en esta computadora. */
+function actualizarPestana() {
+  const nodo = $("tab-vivo-texto");
+  const L = V.local, texto = L ? `Mi video ${V.motor ? Math.min(99, Math.floor(100 * V.motor.contador / L.total)) : 0} %` : "En vivo";
+  if (nodo.textContent !== texto) nodo.textContent = texto;
+  $("app").classList.toggle("vivo-archivo", !!L);
+}
+
 function detener(avisar = true) {
-  const habia = V.activo;
+  const habia = V.activo, local = V.local;
   V.activo = false;
+  V.local = null;
   if (V.flujo) { V.flujo.getTracks().forEach((t) => t.stop()); V.flujo = null; }
   video.pause();
   video.removeAttribute("src");
@@ -126,14 +272,17 @@ function detener(avisar = true) {
   if (V.url) { URL.revokeObjectURL(V.url); V.url = null; }
   $("v-insignia").hidden = true;
   botones(false);
-  if (avisar && habia && V.motor) {
+  actualizarPestana();
+  if (avisar && local) mensaje("Análisis cancelado. Para analizar un video usa Abrir video → Analizar mi video.");
+  else if (avisar && habia && V.motor) {
     mensaje(`Análisis detenido: ${V.motor.flota.registros.size} camiones seguidos en ${mmss(V.motor.tiempo())}. Elige otra fuente para empezar de nuevo.`);
   }
 }
 
 function botones(ocupado) {
-  for (const id of ["v-pantalla", "v-archivo", "v-camara"]) $(id).disabled = ocupado;
+  for (const id of ["v-pantalla", "v-camara"]) $(id).disabled = ocupado;
   $("v-detener").disabled = !ocupado;
+  $("v-detener").lastChild.textContent = V.local ? "\u00a0 Cancelar" : "\u00a0 Detener";
   if (!navigator.mediaDevices?.getDisplayMedia) $("v-pantalla").disabled = true;
   if (!navigator.mediaDevices?.getUserMedia) $("v-camara").disabled = true;
 }
@@ -170,6 +319,7 @@ function medir(t0) {
   V.tiempos.push(performance.now() - t0);
   if (V.tiempos.length > 30) V.tiempos.shift();
   actualizarPanel();
+  if (V.local) actualizarPestana();
 }
 
 /**
@@ -178,40 +328,68 @@ function medir(t0) {
  * lenta), y asi los numeros de los camiones salen iguales a los de la app.
  */
 async function analizarVideo() {
-  const motor = V.motor, total = Math.floor(video.duration * FPS + 1e-6);
+  const motor = V.motor;
   const t0 = performance.now();
-  for (let n = motor.contador + 1; n <= total; n++) {
+  V.saltados = 0;
+  // El video avanza de a un cuadro: se reproduce, en cuanto muestra el cuadro siguiente se pausa,
+  // se analiza y se continua. Es mucho mas rapido que "buscar" cada cuadro.
+  // Ritmo de reproduccion: sube mientras no se pierdan cuadros y baja si se pierde alguno.
+  let ritmo = 1, seguidos = 0;
+  while (V.activo && V.motor === motor) {
+    video.playbackRate = ritmo;
+    const meta = await siguienteImagen();
     if (!V.activo || V.motor !== motor) return;
-    const ti = performance.now();
-    let dets = null;
-    if (motor.debeInferir(n)) {
-      await irA((n - 0.5) / FPS);
+    if (!meta) break;                                         // termino el video
+    let n = Math.round(meta.mediaTime * V.fps) + 1;
+    if (n <= motor.contador) { continue; }
+    if (n > motor.contador + 1) {
+      // El navegador se adelanto: se vuelve al cuadro que falta (asi no se salta ninguno).
+      V.saltados++;
+      ritmo = Math.max(0.25, ritmo * 0.75); seguidos = 0;
+      n = motor.contador + 1;
+      await irA((n - 0.5) / V.fps);
       if (!V.activo || V.motor !== motor) return;
-      dets = await V.det.detectar(video, ANCHO_TRABAJO, ALTO_TRABAJO);
-    }
+    } else if (++seguidos >= 45) { ritmo = Math.min(2, ritmo * 1.15); seguidos = 0; }
+    const ti = performance.now();
+    const dets = motor.debeInferir(n) ? await V.det.detectar(video, ANCHO_TRABAJO, ALTO_TRABAJO) : null;
+    if (!V.activo || V.motor !== motor) return;
     V.ultimaFila = motor.paso(dets);
-    V.cuadros.push(V.ultimaFila);
+    if (!V.local) V.cuadros.push(V.ultimaFila);
     V.nUltima = n;
-    if (dets) {
-      medir(ti);
-      V.velocidad = (n / FPS) / ((performance.now() - t0) / 1000);
-      await esperar(0);
-    }
+    if (V.local) await enviarCuadro(n, dets);
+    if (!V.activo || V.motor !== motor) return;
+    if (dets) { medir(ti); V.velocidad = (n / V.fps) / ((performance.now() - t0) / 1000); }
+    if (video.ended || n >= Math.floor(video.duration * V.fps + 1e-6)) break;
   }
+  if (V.activo && V.motor === motor && V.local) { terminarLocal(); return; }
   if (V.activo && V.motor === motor) {
-    const seguidos = motor.flota.registros.size;
+    const total = motor.flota.registros.size;
     detener(false);
-    mensaje(`Video terminado: ${seguidos} camiones seguidos en ${mmss(motor.tiempo())}. Elige otra fuente para analizar otra vez.`);
+    mensaje(`Video terminado: ${total} camiones seguidos en ${mmss(motor.tiempo())}. Elige otra fuente para analizar otra vez.`);
   }
 }
 
 function irA(t) {
   return new Promise((ok) => {
-    if (Math.abs(video.currentTime - t) < 1e-4 && video.readyState >= 2) { ok(); return; }
     const listo = () => { clearTimeout(tope); ok(); };
     const tope = setTimeout(() => { video.removeEventListener("seeked", listo); ok(); }, 2000);
     video.addEventListener("seeked", listo, { once: true });
     video.currentTime = t;
+  });
+}
+
+/** Reproduce hasta que el navegador muestra un cuadro nuevo y pausa ahi. Devuelve sus datos (o null al final). */
+function siguienteImagen() {
+  return new Promise((ok) => {
+    if (video.ended) { ok(null); return; }
+    const alTerminar = () => ok(null);
+    video.addEventListener("ended", alTerminar, { once: true });
+    video.requestVideoFrameCallback((ahora, meta) => {
+      video.pause();
+      video.removeEventListener("ended", alTerminar);
+      ok(meta);
+    });
+    if (video.paused) video.play().catch(() => ok(null));
   });
 }
 
@@ -255,14 +433,23 @@ const esperar = (ms) => new Promise((r) => setTimeout(r, ms));
 const siguienteCuadro = () => new Promise((r) => (video.requestVideoFrameCallback ? video.requestVideoFrameCallback(() => r()) : setTimeout(r, 16)));
 
 function actualizarPanel() {
-  const m = V.motor, prom = V.tiempos.reduce((s, v) => s + v, 0) / V.tiempos.length;
+  const m = V.motor, prom = V.tiempos.reduce((s, v) => s + v, 0) / V.tiempos.length, L = V.local;
   $("v-activos").textContent = V.ultimaFila ? V.ultimaFila[2] : 0;
   $("v-seguidos").textContent = m.flota.registros.size;
-  $("v-tiempo").textContent = mmss(m.tiempo());
+  $("v-tiempo").textContent = mmss(m.tiempo()) + (L ? ` de ${mmss(L.total / V.fps)}` : "");
   const fps = 1000 / prom;
   $("v-fps").textContent = `${fps.toFixed(fps < 10 ? 1 : 0)} veces`;
   // Con un video se analiza cuadro por cuadro: si la PC no alcanza, el video va en camara lenta.
   $("v-fila-vel").hidden = !V.pasos;
+  $("v-fila-avance").hidden = !L;
+  $("v-titulo-panel").textContent = L ? "ANALIZANDO TU VIDEO" : "ANÁLISIS EN VIVO";
+  if (L) {
+    const fr = Math.min(1, m.contador / L.total);
+    $("v-avance").textContent = `${Math.floor(fr * 100)} %`;
+    $("v-barra").style.width = `${(fr * 100).toFixed(1)}%`;
+    const falta = (L.total - m.contador) / V.fps / Math.max(V.velocidad, 0.01);
+    $("v-falta").textContent = m.contador < 30 ? "calculando…" : `faltan ~${mmss(falta + 5)}`;
+  }
   if (V.pasos) $("v-vel").textContent = V.velocidad >= 0.95 ? "normal" : `×${V.velocidad.toFixed(V.velocidad < 0.1 ? 2 : 1)} (más lento)`;
   const c = $("v-consejo");
   const lento = V.tiempos.length >= 15 && fps < 8;
@@ -350,7 +537,10 @@ function dibujar() {
 }
 
 // ---------------------------------------------------------------- inicio
-export function iniciarVivo() {
+let alTerminarArchivo = null;
+/** alTerminarArchivo({ demo, tablero, url, archivo }): se llama cuando termina "Analizar mi video" en esta computadora. */
+export function iniciarVivo({ alTerminarArchivo: fn } = {}) {
+  alTerminarArchivo = fn || null;
   $("v-pantalla").addEventListener("click", () => empezar("pantalla", async () => {
     const flujo = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 30 }, audio: false });
     return { flujo };
@@ -359,16 +549,10 @@ export function iniciarVivo() {
     const flujo = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 1920 }, height: { ideal: 1080 }, facingMode: "environment" }, audio: false });
     return { flujo };
   }));
-  $("v-archivo").addEventListener("click", () => $("v-entrada").click());
-  $("v-entrada").addEventListener("change", () => {
-    const f = $("v-entrada").files[0];
-    $("v-entrada").value = "";
-    if (f) empezar("archivo", async () => ({ url: URL.createObjectURL(f) }));
-  });
   $("v-detener").addEventListener("click", () => detener());
   botones(false);
   if (!navigator.mediaDevices?.getDisplayMedia) {
-    $("v-ayuda").textContent = "En este dispositivo no se puede compartir la pantalla (pasa en celulares). Usa una computadora con Chrome o Edge, o prueba con un video o la cámara.";
+    $("v-ayuda").textContent = "En este dispositivo no se puede compartir la pantalla (pasa en celulares). Usa una computadora con Chrome o Edge, o prueba con la cámara. Para un video grabado: Abrir video → Analizar mi video.";
   }
 }
 
@@ -378,8 +562,31 @@ export function vivoVisible(si) {
   if (si && !V.dibujando) { V.dibujando = true; requestAnimationFrame(dibujar); }
 }
 
-/** Para las pruebas automaticas: empezar con una URL de video. */
-export function vivoProbar(url) { return empezar("archivo", async () => ({ url })); }
+/**
+ * "Analizar mi video" -> "En mi computadora". modo: Precision, Equilibrado o Rapido; largo: metros de un camion.
+ * Al terminar llama a alTerminarArchivo (ver iniciarVivo).
+ */
+export function analizarArchivo(archivo, { modo = "Precision", largo = 15 } = {}) {
+  const [nombreModo, skip] = MODOS[modo] || MODOS.Precision;
+  return empezar("archivo", async () => ({ url: URL.createObjectURL(archivo), archivo, nombreModo, skip,
+                                          largo: Number(largo) > 0 ? Number(largo) : 15 }));
+}
+
+/** ¿Esta computadora puede analizar videos? (tarjeta grafica con WebGPU, y si es una basica). */
+export async function revisarEquipo() {
+  const forzado = new URLSearchParams(location.search).get("motor");          // pruebas: ?motor=wasm
+  if (forzado) return { webgpu: true, tarjeta: `prueba con ${forzado}`, basica: false };
+  if (!navigator.gpu) return { webgpu: false, tarjeta: "", basica: true };
+  try {
+    const a = await navigator.gpu.requestAdapter({ powerPreference: "high-performance" });
+    if (!a) return { webgpu: false, tarjeta: "", basica: true };
+    const i = a.info || {}, vendedor = String(i.vendor || "").toLowerCase();
+    return { webgpu: true, tarjeta: [i.vendor, i.architecture].filter(Boolean).join(" "),
+             basica: !!i.isFallbackAdapter || /intel|qualcomm|arm|mali|adreno|microsoft|google/.test(vendedor) };
+  } catch { return { webgpu: false, tarjeta: "", basica: true }; }
+}
+export const analizandoArchivo = () => !!V.local;
 if (new URLSearchParams(location.search).has("prueba")) window.__vivo = () => estadoVivo();
 export const estadoVivo = () => ({ activo: V.activo, proveedor: V.proveedor, fila: V.ultimaFila, contador: V.motor?.contador,
-  seguidos: V.motor?.flota.registros.size, tiempos: [...V.tiempos], cuadros: V.cuadros, recorte: V.recorte, velocidad: V.velocidad });
+  fps: V.fps, local: V.local && { total: V.local.total, hechos: V.local.hechos, listoPython: V.local.listoPython },
+  seguidos: V.motor?.flota.registros.size, tiempos: [...V.tiempos], cuadros: V.cuadros, recorte: V.recorte, velocidad: V.velocidad, saltados: V.saltados });

@@ -13,7 +13,7 @@ const f = Math.fround;
 const r3 = (v) => Math.round(v * 1000) / 1000;
 
 /** Esquinas y caja recta de una caja rotada, con la misma precision (float32) que Ultralytics. */
-function geometria(x, y, w, h, a) {
+export function geometria(x, y, w, h, a) {
   const co = f(Math.cos(f(a))), si = f(Math.sin(f(a)));
   const v1 = [f(f(f(w) / 2) * co), f(f(f(w) / 2) * si)], v2 = [f(f(-f(h) / 2) * si), f(f(f(h) / 2) * co)];
   const cx = f(x), cy = f(y);
@@ -25,15 +25,17 @@ function geometria(x, y, w, h, a) {
 
 export class MotorVivo {
   /** fps: cuadros por segundo con que se numeran los cuadros; salto: 1, 1.25 o 1.5 (cada cuantos corre YOLO). */
-  constructor({ fps = 30, salto = 1 } = {}) {
+  constructor({ fps = 30, salto = 1, enVivo = false } = {}) {
     this.fps = fps;
     this.salto = salto;
     this.rastreador = new ByteTrack();
-    this.flota = new Flota(fps);
+    // enVivo (pantalla o camara): reglas de salida por el borde un poco mas amplias (ver seguimiento.js).
+    this.flota = new Flota(fps, enVivo ? { factorSalida: 1.5, salidaSinDireccion: true } : {});
     this.contador = 0;
     this.cajasVisuales = new Map();
     this.poligonos = new Map();
     this.ultimasCrudas = [];
+    this.ultimasPistas = [];
   }
 
   /** ¿En el proximo cuadro corre YOLO? (Motor._debe_inferir) */
@@ -55,8 +57,10 @@ export class MotorVivo {
     if (inferido) {
       const pistas = this.rastreador.actualizar(dets);
       const obs = [], poliInt = new Map();
+      this.ultimasPistas = [];                 // [id, x1, y1, x2, y2, poligono (8)]: lo que recibe motor.py
       for (const [x, y, w, h, a, id] of pistas) {
         const { poli, xyxy: [x1, y1, x2, y2] } = geometria(x, y, w, h, a);
+        this.ultimasPistas.push([id, x1, y1, x2, y2, ...poli.flat()]);
         const caja = [Math.trunc(x1), Math.trunc(y1), Math.max(1, Math.trunc(x2 - x1)), Math.max(1, Math.trunc(y2 - y1))];
         obs.push([id, caja]);
         const [cx, cy] = centro(caja);
