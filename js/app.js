@@ -185,7 +185,9 @@ async function cargarTrabajo(id) {
 
 // "Analizar mi video" -> "En mi computadora": el analisis termino en este navegador (vivo/vivo.js).
 // Se abre igual que un video de demostracion; el video y los resultados estan solo en esta pestaña.
-function abrirAnalisisLocal({ demo, tablero, url }) {
+function abrirAnalisisLocal({ demo, tablero, url, ajustes = null, guardado = false, nombreVideo = "" }) {
+  // copia sin tocar, para "Guardar análisis" (la pagina ajusta demo y tablero al usarlos)
+  E.analisisLocal = { demo: structuredClone({ ...demo, archivo_video: "video.mp4" }), tablero: structuredClone(tablero) };
   video.pause();
   E.iniciado = false; E.vivo = 0; E.tAvisos = 0; E.fichaFija = null;
   if (E.ranuras.length) limpiarAvisos();
@@ -203,10 +205,26 @@ function abrirAnalisisLocal({ demo, tablero, url }) {
   const aviso = document.createElement("div");
   aviso.className = "aviso-trabajo";
   aviso.innerHTML = "Este es <b>tu video</b>, analizado en tu computadora. Dibuja tus zonas, mira los Resultados y " +
-    "exporta a Excel. <b>Si recargas o cierras la página, se pierde</b> (tendrías que analizarlo otra vez).";
+    "exporta a Excel. <b>Si recargas o cierras la página, se pierde</b>: usa <b>Guardar análisis</b> (en el panel, " +
+    "debajo de Abrir video) para abrirlo otra vez sin analizar.";
   $("t-pie").after(aviso);
+  $("b-guardar-analisis").hidden = false;
+  E.guardadoAnalisis = guardado;
+  if (ajustes) { try { aplicarZonas(ajustes); } catch { /* zonas ilegibles: se abre sin ellas */ } }
   cambiarPestana("monitoreo");
-  toast(`¡Listo! Tu video se analizó: ${tablero?.camiones?.length ?? "?"} camiones. Presiona Iniciar para verlo.`, 7000);
+  if (guardado) {
+    const distinto = nombreVideo && demo.video && nombreVideo !== demo.video;
+    toast(distinto ? `Análisis abierto. Ojo: se hizo con "${demo.video}" y elegiste "${nombreVideo}".`
+                   : "Análisis abierto con tus zonas. Presiona Iniciar para verlo.", 8000);
+    video.addEventListener("loadedmetadata", () => {
+      if (Math.abs(video.duration - demo.duracion_s) > 1.5) {
+        toast(`Este video dura ${horaCorta(video.duration)} pero el análisis es de un video de ${horaCorta(demo.duracion_s)}. ¿Elegiste el video correcto?`, 10000);
+      }
+    }, { once: true });
+  } else {
+    toast(`¡Listo! Tu video se analizó: ${tablero?.camiones?.length ?? "?"} camiones. Presiona Iniciar para verlo. ` +
+          "Usa Guardar análisis para no perderlo.", 9000);
+  }
 }
 
 function iniciarVideo(demo) {
@@ -1186,13 +1204,17 @@ function descargar(nombre, contenido, tipo) {
   setTimeout(() => URL.revokeObjectURL(url), 2000);
 }
 
-$("b-guardar-zonas").addEventListener("click", () => {
-  if (!E.zonas.length) return;
-  // Mismo formato que "Guardar zonas" de la app de escritorio (se puede cargar alla).
+// Mismo formato que "Guardar zonas" de la app de escritorio (se puede cargar alla).
+function datosZonas() {
   const datos = { zonas: E.zonas.map((z) => z.puntos), tipos: E.zonas.map((z) => z.tipo), nombres: E.zonas.map((z) => z.nombre),
                   limites: E.zonas.map((z) => z.limite), roles: E.zonas.map((z) => z.rol || ""), limite_general: E.limiteGeneral || null };
   if (E.georef) datos.georreferencia = E.georef.aDict();
-  descargar("zonas.json", JSON.stringify(datos, null, 2), "application/json");
+  return datos;
+}
+
+$("b-guardar-zonas").addEventListener("click", () => {
+  if (!E.zonas.length) return;
+  descargar("zonas.json", JSON.stringify(datosZonas(), null, 2), "application/json");
   estado("Zonas guardadas en zonas.json (sirve también en la app de escritorio).", C.ok);
 });
 
@@ -1202,7 +1224,15 @@ $("f-zonas").addEventListener("change", async (e) => {
   e.target.value = "";
   if (!archivo) return;
   try {
-    const datos = JSON.parse(await archivo.text());
+    const n = aplicarZonas(JSON.parse(await archivo.text()));
+    estado(`${n} zonas cargadas. El conteo se recalculó con todo el video.`, C.ok);
+  } catch {
+    estado("El archivo no tiene un formato válido de zonas.", C.error);
+  }
+});
+
+/** Pone las zonas, limites y calibracion de un archivo de "Guardar zonas". Devuelve cuantas zonas hay. */
+function aplicarZonas(datos) {
     const nombres = datos.nombres || [], limites = datos.limites || [], roles = datos.roles || [];
     const nuevas = [];
     datos.zonas.forEach((zona, i) => {
@@ -1226,7 +1256,6 @@ $("f-zonas").addEventListener("change", async (e) => {
       $("e-limite").value = E.limiteGeneral ? g(E.limiteGeneral) : "";
     }
     recalcularTodo();
-    estado(`${nuevas.length} zonas cargadas. El conteo se recalculó con todo el video.`, C.ok);
     if (datos.georreferencia) {
       let geo = null;
       try { geo = Georreferencia.desdeDict(datos.georreferencia); } catch { geo = null; }
@@ -1239,9 +1268,61 @@ $("f-zonas").addEventListener("change", async (e) => {
         toast("Este video se analizó sin calibración: aquí no se puede usar la calibración del archivo.");
       }
     }
-  } catch {
-    estado("El archivo no tiene un formato válido de zonas.", C.error);
+    return nuevas.length;
+}
+
+// ---------------------------------------------------------------- guardar y abrir un analisis hecho en esta computadora
+// El archivo (.json.gz) tiene el resultado del analisis (lo mismo que demo.json y resultados.json) y las
+// zonas, limites y calibracion del visitante. El video no va dentro: al abrirlo se elige el video otra vez.
+const FORMATO_ANALISIS = "camiones-mineros/analisis";
+
+async function comprimir(texto) {
+  if (!window.CompressionStream) return { blob: new Blob([texto], { type: "application/json" }), ext: ".json" };
+  const flujo = new Blob([texto]).stream().pipeThrough(new CompressionStream("gzip"));
+  return { blob: await new Response(flujo).blob(), ext: ".json.gz" };
+}
+
+async function leerAnalisis(archivo) {
+  const bytes = new Uint8Array(await archivo.arrayBuffer());
+  let texto;
+  if (bytes[0] === 0x1f && bytes[1] === 0x8b) {
+    const flujo = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip"));
+    texto = await new Response(flujo).text();
+  } else texto = new TextDecoder().decode(bytes);
+  const datos = JSON.parse(texto);
+  if (datos.formato !== FORMATO_ANALISIS || !datos.demo) throw new Error("formato");
+  return datos;
+}
+
+$("b-guardar-analisis").addEventListener("click", async () => {
+  if (!E.local || !E.analisisLocal) return;
+  try {
+    const { demo, tablero } = E.analisisLocal;
+    const texto = JSON.stringify({ formato: FORMATO_ANALISIS, version: 1, guardado: new Date().toISOString(),
+                                   demo, tablero, ajustes: datosZonas() });
+    const { blob, ext } = await comprimir(texto);
+    descargarBlob(`analisis_${(demo.video || "mi_video").replace(/\.[^.]+$/, "")}${ext}`, blob);
+    E.guardadoAnalisis = true;
+    estado("Análisis guardado (con tus zonas). Búscalo en tu carpeta de Descargas.", C.ok);
+    toast("Para abrirlo otra vez: Abrir video → Analizar mi video → Abrir un análisis guardado, y elige este archivo y tu video.", 8000);
+  } catch (error) {
+    console.error(error);
+    toast("No se pudo guardar el análisis.");
   }
+});
+
+$("b-abrir-guardado").addEventListener("click", async () => {
+  const fa = $("f-guardado").files[0], fv = $("f-guardado-video").files[0];
+  const err = $("f-guardado-error");
+  err.hidden = true;
+  const mal = (t) => { err.textContent = t; err.hidden = false; };
+  if (!fa) return mal("Elige el archivo del análisis (analisis_….json.gz).");
+  if (!fv) return mal("Elige también tu video (el mismo que analizaste).");
+  let datos;
+  try { datos = await leerAnalisis(fa); } catch { return mal("Ese archivo no es un análisis guardado de esta página."); }
+  $("dlg-videos").close();
+  abrirAnalisisLocal({ demo: datos.demo, tablero: datos.tablero, url: URL.createObjectURL(fv), ajustes: datos.ajustes,
+                       guardado: true, nombreVideo: fv.name });
 });
 
 // ---------------------------------------------------------------- calibracion, limite, velocidad, Excel
@@ -1702,7 +1783,7 @@ iniciarVivo({ alTerminarArchivo: abrirAnalisisLocal });
 if (new URLSearchParams(location.search).has("prueba")) window.__app = E;          // pruebas automaticas
 // Tu video analizado en esta computadora vive solo en esta pestaña: se avisa antes de cerrarla o recargarla.
 window.addEventListener("beforeunload", (e) => {
-  if (E.local || analizandoArchivo()) { e.preventDefault(); e.returnValue = ""; }
+  if ((E.local && !E.guardadoAnalisis) || analizandoArchivo()) { e.preventDefault(); e.returnValue = ""; }
 });
 $("tab-monitoreo").addEventListener("keydown", (e) => { if (e.key === "ArrowRight") { $("tab-resultados").focus(); cambiarPestana("resultados"); } });
 $("tab-resultados").addEventListener("keydown", (e) => { if (e.key === "ArrowLeft") { $("tab-monitoreo").focus(); cambiarPestana("monitoreo"); } });
