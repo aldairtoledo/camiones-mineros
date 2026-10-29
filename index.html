@@ -109,7 +109,7 @@
         <button role="tab" id="tab-resultados" aria-selected="false" aria-controls="vista-resultados">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>Resultados</button>
         <button role="tab" id="tab-vivo" aria-selected="false" aria-controls="vista-vivo">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="2.5"/><path d="M7.8 7.8a6 6 0 0 0 0 8.4M16.2 7.8a6 6 0 0 1 0 8.4M4.9 4.9a10 10 0 0 0 0 14.2M19.1 4.9a10 10 0 0 1 0 14.2"/></svg>En vivo</button>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="2.5"/><path d="M7.8 7.8a6 6 0 0 0 0 8.4M16.2 7.8a6 6 0 0 1 0 8.4M4.9 4.9a10 10 0 0 0 0 14.2M19.1 4.9a10 10 0 0 1 0 14.2"/></svg><span id="tab-vivo-texto">En vivo</span></button>
       </div>
       <div class="herramientas" role="toolbar" aria-label="Herramientas del video">
         <button class="boton" id="b-vel" aria-pressed="false">◷&nbsp; Velocidades</button>
@@ -167,23 +167,25 @@
     <section class="vista-vivo" id="vista-vivo" role="tabpanel" aria-labelledby="tab-vivo" hidden>
       <div class="vivo-fuentes" role="toolbar" aria-label="Qué analizar en vivo">
         <button class="boton primario" id="v-pantalla">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>Compartir pantalla</button>
-        <button class="boton" id="v-archivo">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6a2 2 0 0 1 2-2h4l2 2h6a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/></svg>Video de mi PC</button>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>Compartir pantalla (simulador o Discord)</button>
         <button class="boton" id="v-camara">
           <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="7" width="13" height="10" rx="2"/><path d="m16 11 5-3v8l-5-3"/></svg>Cámara</button>
-        <button class="boton" id="v-detener" disabled>■&nbsp; Detener</button>
-        <input type="file" id="v-entrada" accept="video/*" hidden>
-        <p class="vivo-ayuda" id="v-ayuda">Analiza en tiempo real la pantalla del simulador, una transmisión de Discord o un video. Todo ocurre en tu computadora: no se sube nada.</p>
+        <button class="boton" id="v-detener" disabled>■<span>&nbsp; Detener</span></button>
+        <p class="vivo-ayuda" id="v-ayuda">Analiza en tiempo real la pantalla del simulador, una transmisión de Discord o la cámara. Todo ocurre en tu computadora: no se sube nada.
+          ¿Tienes un video grabado? Usa <b>Abrir video → Analizar mi video</b>.</p>
       </div>
       <div class="escena">
         <div class="marco-video vivo-marco" id="v-marco">
           <canvas id="v-lienzo" aria-label="Análisis en vivo con los camiones y sus números"></canvas>
-          <div class="mensaje-video" id="v-mensaje"><span>Elige qué analizar: <b>Compartir pantalla</b> (el simulador o una transmisión de Discord), <b>Video de mi PC</b> o <b>Cámara</b>.</span></div>
+          <div class="mensaje-video" id="v-mensaje"><span>Elige qué analizar: <b>Compartir pantalla</b> (el simulador o una transmisión de Discord) o <b>Cámara</b>.</span></div>
           <span class="vivo-insignia" id="v-insignia" hidden>● EN VIVO</span>
         </div>
         <aside class="panel-conteo vivo-panel" aria-label="Datos del análisis en vivo">
-          <h2>ANÁLISIS EN VIVO</h2>
+          <h2 id="v-titulo-panel">ANÁLISIS EN VIVO</h2>
+          <div class="vivo-avance" id="v-fila-avance" hidden>
+            <div class="vivo-avance-cab"><strong id="v-avance">0 %</strong><span id="v-falta">calculando…</span></div>
+            <div class="barra-progreso" role="presentation"><span id="v-barra"></span></div>
+          </div>
           <div class="vivo-dato grande"><span>Camiones en pantalla</span><strong id="v-activos">0</strong></div>
           <div class="vivo-dato"><span>Camiones seguidos</span><strong id="v-seguidos">0</strong></div>
           <div class="vivo-dato"><span>Tiempo analizado</span><strong id="v-tiempo">0:00</strong></div>
@@ -191,7 +193,7 @@
           <div class="vivo-dato" id="v-fila-vel" hidden><span>Velocidad del video</span><strong id="v-vel">—</strong></div>
           <div class="vivo-dato"><span>Procesa con</span><strong id="v-motor">—</strong></div>
           <p class="vivo-nota" id="v-consejo" hidden></p>
-          <p class="vivo-nota suave">Próximamente aquí: zonas y conteo, velocidades, avisos, Resultados y Excel del análisis en vivo.</p>
+          <p class="vivo-nota suave" id="v-nota">Próximamente aquí: zonas y conteo, velocidades, avisos, Resultados y Excel del análisis en vivo.</p>
         </aside>
       </div>
       <video id="v-video" muted playsinline hidden></video>
@@ -294,35 +296,53 @@
     <div id="lista-videos" class="lista-videos"></div>
   </section>
   <section id="pane-subir" hidden>
-    <p class="srv-estado" id="srv-estado">Comprobando el servidor…</p>
     <form id="form-subir" class="form-subir" autocomplete="off">
       <label class="campo">
         <span class="etq">1. Tu video</span>
         <input type="file" id="f-video" accept="video/*,.mp4,.mov,.m4v,.avi,.mkv,.webm">
         <small class="suave" id="f-video-info"></small>
-        <small class="suave" id="t-limites">Hasta 5 minutos y 200 MB. Se borra a las 24 horas.</small>
       </label>
+      <fieldset class="campo donde">
+        <legend class="etq">2. ¿Dónde se analiza?</legend>
+        <label class="opcion-donde" id="op-local">
+          <input type="radio" name="donde" value="local">
+          <span class="od-cuerpo">
+            <span class="od-titulo">En mi computadora <em class="od-insignia" id="od-rec-local" hidden>Recomendado</em></span>
+            <span class="od-texto">Rápido y gratis. Usa la tarjeta gráfica de tu computadora; tu video no se sube a ningún lado.</span>
+            <span class="od-estado" id="od-equipo">Revisando tu computadora…</span>
+          </span>
+        </label>
+        <label class="opcion-donde" id="op-nube">
+          <input type="radio" name="donde" value="nube">
+          <span class="od-cuerpo">
+            <span class="od-titulo">En la nube <em class="od-insignia" id="od-rec-nube" hidden>Recomendado</em></span>
+            <span class="od-texto">Para celulares o computadoras sin tarjeta gráfica. Necesita el código de acceso del laboratorio.
+              <span id="t-limites">Hasta 5 minutos y 200 MB. Se borra a las 24 horas.</span></span>
+            <span class="od-estado srv-estado" id="srv-estado">Comprobando el servidor…</span>
+          </span>
+        </label>
+      </fieldset>
       <label class="campo">
-        <span class="etq">2. Largo real de un camión (m)</span>
+        <span class="etq">3. Largo real de un camión (m)</span>
         <input type="number" id="f-largo" value="15" min="3" max="25" step="0.5" inputmode="decimal">
         <small class="suave">Sirve para pasar de píxeles a metros. Un camión minero grande mide 13–15 m; si no lo sabes, deja 15.</small>
       </label>
       <label class="campo">
-        <span class="etq">3. Velocidad de análisis</span>
+        <span class="etq">4. Velocidad de análisis</span>
         <select id="f-modo">
-          <option value="Equilibrado" selected>Equilibrado (recomendado)</option>
-          <option value="Precision">Precisión (más lento)</option>
+          <option value="Precision">Precisión (como la app)</option>
+          <option value="Equilibrado" selected>Equilibrado</option>
           <option value="Rapido">Rápido</option>
         </select>
       </label>
-      <label class="campo">
-        <span class="etq">4. Código de acceso</span>
+      <label class="campo solo-nube">
+        <span class="etq">5. Código de acceso</span>
         <input type="password" id="f-codigo" placeholder="Te lo da el laboratorio">
       </label>
       <p class="f-error" id="f-error" role="alert" hidden></p>
-      <button class="boton primario" id="b-subir" type="submit">Subir y analizar</button>
-      <p class="suave nota-subir">Tu video se analiza en un servidor en la nube con el mismo modelo del laboratorio.
-        Las zonas las dibujas después, sobre el resultado.</p>
+      <button class="boton primario" id="b-subir" type="submit">Analizar en mi computadora</button>
+      <p class="suave nota-subir" id="nota-subir">Con cualquiera de las dos opciones se usa el mismo modelo y el mismo motor del laboratorio.
+        Al terminar, tu video se abre en Monitoreo: ahí dibujas tus zonas, ves los Resultados y exportas a Excel.</p>
     </form>
     <div class="subida-progreso" id="subida-progreso" hidden aria-live="polite">
       <h4 id="prog-titulo"></h4>
