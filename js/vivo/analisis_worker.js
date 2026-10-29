@@ -65,7 +65,8 @@ async function atender(m) {
       hechos = 0;
       self.postMessage({ tipo: "listo", calibracion: analisis.calibracion ?? null });
     } else if (m.tipo === "paso") {
-      analisis.paso(m.camiones ? JSON.stringify(m.camiones) : null, m.polis ? JSON.stringify(m.polis) : null);
+      // undefined llega a Python como None (null llegaria como JsNull)
+      analisis.paso(m.camiones ? JSON.stringify(m.camiones) : undefined, m.polis ? JSON.stringify(m.polis) : undefined);
       hechos++;
       if (hechos % 15 === 0) self.postMessage({ tipo: "avance", hechos });
     } else if (m.tipo === "terminar") {

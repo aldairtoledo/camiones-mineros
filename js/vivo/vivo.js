@@ -256,7 +256,7 @@ function terminarLocal() {
 function actualizarPestana() {
   const nodo = $("tab-vivo-texto");
   const L = V.local, texto = L ? `Mi video ${V.motor ? Math.min(99, Math.floor(100 * V.motor.contador / L.total)) : 0} %` : "En vivo";
-  if (nodo.textContent !== texto) nodo.textContent = texto;
+  if (nodo && nodo.textContent !== texto) nodo.textContent = texto;
   $("app").classList.toggle("vivo-archivo", !!L);
 }
 
