@@ -557,6 +557,9 @@ class FleetIdentityManager:
         # 3) Detecciones sueltas: camion nuevo (si faltan) o reasignacion optima
         #    a camiones perdidos. Los protegidos nunca se reasignan.
         usados = set(asignaciones.values()) | ocultos | protegidos
+        # Camiones que ya recibieron su propia deteccion en el paso 2 (por ejemplo, un camion
+        # protegido que sigue viendose en su sitio de la cola).
+        vistos_en_su_sitio = set(asignaciones.values())
         sueltas = []
         con_candidata = set()
         for i in obs_validas:
@@ -576,7 +579,10 @@ class FleetIdentityManager:
                 dist = math.hypot(cx - px, cy - py)
                 if dist <= dist_cercano:
                     cercano, dist_cercano = p, dist
-            if cercano is not None and cercano not in con_candidata:
+            # Un camion protegido que sigue viendose en su sitio NO esta saliendo de la cola:
+            # la deteccion cercana es OTRO camion (por ejemplo, uno que entra por el borde
+            # junto a la cola), asi que no se le entrega su numero.
+            if cercano is not None and cercano not in con_candidata and cercano not in vistos_en_su_sitio:
                 con_candidata.add(cercano)
                 if self._confirma_salida(cercano, caja, predicciones, moviles):
                     self.records[cercano].update(perturbado_hasta=-1, quieto=0,
