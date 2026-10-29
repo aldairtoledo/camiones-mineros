@@ -213,7 +213,7 @@ class Analisis:
         """Procesa el siguiente cuadro. camiones_json: lo que encontro ByteTrack (solo en los
         cuadros con YOLO); polis_json: poligonos de YOLO si quiere_medida(n)."""
         m = self.m
-        if camiones_json is not None:
+        if camiones_json:
             m.model.camiones = json.loads(camiones_json)
         self._polis = json.loads(polis_json) if polis_json else None
         if m.siguiente() is None:
